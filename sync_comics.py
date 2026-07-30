@@ -27,7 +27,15 @@ def log(msg):
 
 
 def load_current_data():
-    """Load existing comics.json from GitHub raw."""
+    """Load existing comics.json from local file first, fallback to GitHub raw."""
+    local_path = REPO_DIR / JSON_PATH
+    if local_path.exists():
+        with open(local_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("comics"):
+            log(f"Loaded {len(data['comics'])} comics from local file")
+            return data
+
     url = "https://raw.githubusercontent.com/guodongcgd/comic-gallery/main/comics.json"
     resp = httpx.get(url, timeout=30, follow_redirects=True)
     resp.raise_for_status()
@@ -292,9 +300,28 @@ def main():
     new_gallery = map_to_gallery_format(api_new, next_id)
     log(f"Mapped {len(new_gallery)} comics (IDs {next_id}-{next_id + len(new_gallery) - 1})")
 
-    # Merge
-    all_comics = comics + new_gallery
-    log(f"Total comics: {len(all_comics)}")
+    # Merge, avoiding duplicates by telegram_url
+    existing_urls = set()
+    for c in comics:
+        url = c.get("telegram_url", "") or c.get("telegraph_url", "")
+        if url:
+            existing_urls.add(url)
+
+    deduped_new = []
+    for c in new_gallery:
+        url = c.get("telegram_url", "") or c.get("telegraph_url", "")
+        if url and url in existing_urls:
+            continue
+        deduped_new.append(c)
+        if url:
+            existing_urls.add(url)
+
+    if not deduped_new:
+        log("All new comics already exist (duplicates), nothing to add!")
+        return
+
+    all_comics = comics + deduped_new
+    log(f"Total comics: {len(all_comics)} (added {len(deduped_new)} new)")
 
     # Recalculate meta
     new_tags, new_authors = recalculate_meta(all_comics)
