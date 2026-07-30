@@ -130,35 +130,38 @@ async function scrapeTelegraph(url) {
   return urls;
 }
 
-// ── PikPak Auth ──
+// ── PikPak Auth via Refresh Token ──
 
-async function pikpakLogin(env) {
-  const username = env.PIKPAK_USERNAME;
-  const password = env.PIKPAK_PASSWORD;
+async function pikpakRefreshToken(env) {
+  const refreshToken = env.PIKPAK_REFRESH_TOKEN;
+  if (!refreshToken) throw new Error('PIKPAK_REFRESH_TOKEN not configured');
 
-  if (!username || !password) {
-    throw new Error('PikPak credentials not configured');
-  }
-
-  const resp = await fetch(PK_AUTH_URL, {
+  const resp = await fetch('https://user.mypikpak.com/v1/auth/token', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json; charset=utf-8' },
     body: JSON.stringify({
-      captcha_token: '',
       client_id: PK_CLIENT_ID,
       client_secret: PK_CLIENT_SECRET,
-      username,
-      password,
+      grant_type: 'refresh_token',
+      refresh_token: refreshToken,
     }),
   });
 
   if (!resp.ok) {
     const text = await resp.text();
-    throw new Error(`PikPak login failed: ${resp.status} ${text.slice(0, 200)}`);
+    throw new Error(`PikPak token refresh failed: ${resp.status} ${text.slice(0, 200)}`);
   }
 
   const data = await resp.json();
+  // If a new refresh_token is returned, use it for next time
+  if (data.refresh_token && data.refresh_token !== refreshToken) {
+    console.log('New refresh token available (not persisted across Worker restarts)');
+  }
   return data.access_token;
+}
+
+async function pikpakLogin(env) {
+  return pikpakRefreshToken(env);
 }
 
 // ── PikPak File Operations ──
