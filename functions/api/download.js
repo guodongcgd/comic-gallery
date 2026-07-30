@@ -211,7 +211,7 @@ async function findOrCreateFolder(accessToken, parentId, name) {
     return folderData.file?.id || folderData.id;
   } catch (e) {
     // If folder already exists, we need to find its ID by listing
-    if (e.message?.includes('already exists') || e.message?.includes('500')) {
+    if (e.message?.includes('already exists') || e.message?.includes('file_duplicated_name') || e.message?.includes('500')) {
       const filter = JSON.stringify({
         phase: { eq: { value: 1 } },
         trashed: { eq: { value: false } },
