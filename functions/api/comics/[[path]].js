@@ -116,15 +116,18 @@ export async function onRequest(context) {
 
       let added = 0;
       for (const c of comics) {
-        // Skip if this comic was already imported (check by telegram_url)
+        // Skip if this comic was already imported or deleted (check by telegram_url)
         const telegramUrl = c.telegram_url || '';
         const telegraphUrl = c.telegraph_url || '';
         if (telegramUrl || telegraphUrl) {
           const { results } = await db.prepare(
-            'SELECT COUNT(*) as cnt FROM comics WHERE telegram_url = ? OR telegraph_url = ?'
-          ).bind(telegramUrl, telegraphUrl).all();
-          if (results[0].cnt > 0) {
-            continue; // Already exists (even if deleted), skip
+            `SELECT COUNT(*) as cnt FROM comics WHERE telegram_url = ? OR telegraph_url = ?
+             UNION ALL
+             SELECT COUNT(*) FROM deleted_comics WHERE telegram_url = ?`
+          ).bind(telegramUrl, telegraphUrl, telegramUrl).all();
+          const totalCnt = results.reduce((sum, r) => sum + Object.values(r)[0], 0);
+          if (totalCnt > 0) {
+            continue; // Already exists or was deleted, skip
           }
         }
         const tagsJson = JSON.stringify(c.tags || []);
