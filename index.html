@@ -24,6 +24,7 @@ h1{color:#fbbf24;font-size:1.3rem;margin:0;cursor:pointer}
 .g{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
 .cd{background:#1a1614;border-radius:8px;overflow:hidden;border:1px solid #2a2420;transition:border-color .2s;display:flex;flex-direction:column;position:relative}
 .cd:hover{border-color:#fbbf24}
+.cd.del{opacity:.4;pointer-events:none}
 .cv{width:100%;aspect-ratio:1/1.4;object-fit:cover;display:block;background:#2a2420}
 .if{padding:10px}
 .tt{font-size:0.8rem;font-weight:600;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
@@ -42,6 +43,27 @@ h1{color:#fbbf24;font-size:1.3rem;margin:0;cursor:pointer}
 #loading{text-align:center;padding:40px;color:#a8a29e}
 #error{text-align:center;padding:40px;color:#ef4444;display:none}
 #status{color:#a8a29e;font-size:0.75rem}
+/* Select / Delete */
+.cb-wrap{position:absolute;top:6px;left:6px;z-index:2}
+.cb-wrap input[type=checkbox]{width:18px;height:18px;cursor:pointer;accent-color:#fbbf24;opacity:.3;transition:opacity .15s}
+.cd:hover .cb-wrap input[type=checkbox]{opacity:.8}
+#del-bar{position:fixed;bottom:0;left:0;right:0;background:#1a1614;border-top:2px solid #ef4444;padding:10px 16px;display:none;align-items:center;gap:12px;z-index:100;font-size:.85rem}
+#del-bar .cnt{color:#a8a29e;flex:1}
+.del-go{background:#ef4444;color:#fff;border:none;padding:6px 20px;border-radius:5px;cursor:pointer;font-weight:600}
+.del-go:hover{background:#dc2626}
+.del-cancel{background:#2a2420;color:#a8a29e;border:1px solid #5a4a40;padding:6px 16px;border-radius:5px;cursor:pointer}
+.del-cancel:hover{color:#e7e0d9}
+/* Modal */
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.7);z-index:200;display:none;align-items:center;justify-content:center}
+.modal{background:#1a1614;border:1px solid #2a2420;border-radius:12px;padding:24px;max-width:500px;width:90%;max-height:80vh;overflow-y:auto}
+.modal h3{color:#fbbf24;margin-bottom:12px}
+.modal p{color:#a8a29e;font-size:.85rem;margin-bottom:8px;line-height:1.5}
+.modal .del-list{background:#0f0c0a;border-radius:6px;padding:8px 12px;max-height:200px;overflow-y:auto;margin:8px 0;font-size:.75rem;color:#e7e0d9}
+.modal .del-list li{padding:2px 0;border-bottom:1px solid #2a2420}
+.modal input[type=password]{width:100%;padding:8px 12px;border-radius:6px;border:1px solid #2a2420;background:#0f0c0a;color:#e7e0d9;font-size:.85rem;margin:8px 0;outline:none}
+.modal input[type=password]:focus{border-color:#fbbf24}
+.modal .btn-row{display:flex;gap:8px;margin-top:12px}
+.modal .btn-row button{flex:1;padding:8px;border-radius:6px;border:none;cursor:pointer;font-weight:600}
 @media(max-width:600px){.g{grid-template-columns:repeat(2,1fr)}.fb{max-height:80px}}
 </style>
 </head>
@@ -62,20 +84,54 @@ h1{color:#fbbf24;font-size:1.3rem;margin:0;cursor:pointer}
 <div id="error"></div>
 <div class="g" id="g"></div>
 <div class="pag" id="pag2"></div>
+
+<div id="del-bar">
+  <span class="cnt" id="del-cnt">已选择 0 本</span>
+  <button class="del-cancel" onclick="clearSelection()">取消选择</button>
+  <button class="del-cancel" onclick="selectAllFiltered()">✅ 全选当前筛选</button>
+  <button class="del-go" onclick="showDeleteModal()">🗑 删除选中</button>
+</div>
+
+<!-- Delete Modal -->
+<div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
+<div class="modal">
+<h3>🗑 确认删除</h3>
+<p>将从数据中永久删除以下 <span id="del-count">0</span> 本漫画：</p>
+<ul class="del-list" id="del-list"></ul>
+<p style="font-size:.75rem">⚠️ 操作不可撤销！删除后需输入 GitHub Token 提交更改。</p>
+<input type="password" id="token-input" placeholder="输入 GitHub Token (ghp_...)" autocomplete="off">
+<p id="del-status" style="color:#fbbf24;font-size:.8rem"></p>
+<div class="btn-row">
+<button style="background:#2a2420;color:#a8a29e" onclick="closeModal()">取消</button>
+<button id="del-confirm-btn" style="background:#ef4444;color:#fff" onclick="confirmDelete()">确认删除并提交</button>
+</div>
+</div>
+</div>
+
 <script>
 var ALL_DATA={}, allComics=[], allTags=[], allAuthors=[];
 var sc=false, cp=1, totalPages=1, perPage=20;
 var selAuthors=[], selTags=[], searchQ='';
 var filtered=[];
+var selected=new Set();
+var repoOwner='guodongcgd', repoName='comic-gallery', jsonPath='comics.json';
 
 function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
-function getVal(obj,key){return obj[key]||'';}
 
 function renderCard(c){
-  var cd=document.createElement('div');cd.className='cd';
+  var cd=document.createElement('div');cd.className='cd';cd.dataset.id=c.id;
+  // Checkbox + delete
+  var wrap=document.createElement('div');wrap.className='cb-wrap';
+  var cb=document.createElement('input');cb.type='checkbox';cb.dataset.id=c.id;
+  cb.checked=selected.has(String(c.id));
+  cb.onclick=function(){toggleSelect(this.dataset.id)};
+  wrap.appendChild(cb);
+  cd.appendChild(wrap);
+  // Cover
   var img=document.createElement('img');img.className='cv';img.src=c.cover_url;img.loading='lazy';
   img.onerror=function(){this.style.display='none'};
   cd.appendChild(img);
+  // Info
   var di=document.createElement('div');di.className='if';
   var cn=document.createElement('div');cn.className='tt cn';cn.textContent=c.title_cn;di.appendChild(cn);
   var rw=document.createElement('div');rw.className='tt rw';rw.textContent=c.title_original;di.appendChild(rw);
@@ -100,28 +156,27 @@ function renderCard(c){
   return cd;
 }
 
+function renderPage(p){
+  cp=Math.max(1,Math.min(p,totalPages));
+  var start=(cp-1)*perPage,end=Math.min(start+perPage,filtered.length);
+  var g=document.getElementById('g');g.innerHTML='';
+  for(var i=start;i<end;i++){g.appendChild(renderCard(filtered[i]));}
+  renderPagination();applyTitleToggle();
+}
+
 function applyFilter(){
   var q=searchQ.toLowerCase();
   filtered=allComics.filter(function(c){
     var ma=true;
-    if(selAuthors.length){
-      var found=false;
-      for(var i=0;i<selAuthors.length;i++){if(c.author===selAuthors[i]){found=true;break;}}
-      if(!found)ma=false;
-    }
-    if(ma&&selTags.length){
-      var found=false;
-      for(var i=0;i<selTags.length;i++){if(c.tags.indexOf(selTags[i])>=0){found=true;break;}}
-      if(!found)ma=false;
-    }
+    if(selAuthors.length){var found=false;for(var i=0;i<selAuthors.length;i++){if(c.author===selAuthors[i]){found=true;break;}}if(!found)ma=false;}
+    if(ma&&selTags.length){var found=false;for(var i=0;i<selTags.length;i++){if(c.tags.indexOf(selTags[i])>=0){found=true;break;}}if(!found)ma=false;}
     if(ma&&q){
       var match=q.split(' ').filter(function(x){return x;});
       for(var i=0;i<match.length;i++){
         var kw=match[i];
         var inTitle=(c.title_cn&&c.title_cn.toLowerCase().indexOf(kw)>=0)||(c.title_original&&c.title_original.toLowerCase().indexOf(kw)>=0);
         var inAuthor=c.author&&c.author.toLowerCase().indexOf(kw)>=0;
-        var inTags=false;
-        for(var j=0;j<c.tags.length;j++){if(c.tags[j].toLowerCase().indexOf(kw)>=0){inTags=true;break;}}
+        var inTags=false;for(var j=0;j<c.tags.length;j++){if(c.tags[j].toLowerCase().indexOf(kw)>=0){inTags=true;break;}}
         if(!inTitle&&!inAuthor&&!inTags){ma=false;break;}
       }
     }
@@ -132,14 +187,7 @@ function applyFilter(){
   document.getElementById('acnt').textContent='('+selAuthors.length+'/'+allAuthors.length+')';
   document.getElementById('tcnt').textContent='('+selTags.length+'/'+allTags.length+')';
   renderPage(1);
-}
-
-function renderPage(p){
-  cp=Math.max(1,Math.min(p,totalPages));
-  var start=(cp-1)*perPage,end=Math.min(start+perPage,filtered.length);
-  var g=document.getElementById('g');g.innerHTML='';
-  for(var i=start;i<end;i++){g.appendChild(renderCard(filtered[i]));}
-  renderPagination();applyTitleToggle();
+  updateDelBar();
 }
 
 function renderPagination(){
@@ -180,7 +228,132 @@ function ss(){searchQ=document.getElementById('sb').value.trim();applyFilter();}
 function tg(){sc=!sc;document.getElementById('tgb').textContent=sc?'显示中文':'显示原标题';document.getElementById('tgb').classList.toggle('on',!sc);applyTitleToggle();}
 function applyTitleToggle(){document.querySelectorAll('.tt.cn').forEach(function(e){e.style.display=sc?'none':''});document.querySelectorAll('.tt.rw').forEach(function(e){e.style.display=sc?'':'none'});}
 
-// Load data
+// ── Selection & Delete ──
+function toggleSelect(id){
+  id=String(id);
+  if(selected.has(id))selected.delete(id);else selected.add(id);
+  updateDelBar();
+  var cb=document.querySelector('.cd[data-id="'+id+'"] input[type=checkbox]');
+  if(cb)cb.checked=selected.has(id);
+}
+
+function clearSelection(){selected.clear();updateDelBar();syncCheckboxes();}
+function syncCheckboxes(){
+  document.querySelectorAll('.cd input[type=checkbox]').forEach(function(cb){cb.checked=selected.has(cb.dataset.id);});
+}
+
+function selectAllFiltered(){
+  for(var i=0;i<filtered.length;i++)selected.add(String(filtered[i].id));
+  updateDelBar();syncCheckboxes();
+}
+
+function updateDelBar(){
+  var bar=document.getElementById('del-bar');
+  document.getElementById('del-cnt').textContent='已选择 '+selected.size+' 本';
+  bar.style.display=selected.size?'flex':'none';
+}
+
+function showDeleteModal(){
+  if(selected.size===0)return;
+  var ids=Array.from(selected);
+  var list=document.getElementById('del-list');list.innerHTML='';
+  var count=0;
+  for(var i=0;i<allComics.length;i++){
+    if(selected.has(String(allComics[i].id))){
+      count++;
+      var li=document.createElement('li');
+      li.textContent='#'+allComics[i].id+' '+(allComics[i].title_cn||allComics[i].title_original||'?');
+      list.appendChild(li);
+      if(count>50){var more=document.createElement('li');more.textContent='... 还有 '+(selected.size-50)+' 本';more.style.color='#ef4444';list.appendChild(more);break;}
+    }
+  }
+  document.getElementById('del-count').textContent=selected.size;
+  document.getElementById('del-status').textContent='';
+  document.getElementById('token-input').value='';
+  document.getElementById('modal-overlay').style.display='flex';
+}
+
+function closeModal(){document.getElementById('modal-overlay').style.display='none';}
+
+function getGithubApiUrl(repo,path){return 'https://api.github.com/repos/'+repoOwner+'/'+repoName+'/contents/'+path;}
+
+async function confirmDelete(){
+  var token=document.getElementById('token-input').value.trim();
+  if(!token){document.getElementById('del-status').textContent='请输入 GitHub Token';return;}
+  
+  var btn=document.getElementById('del-confirm-btn');
+  btn.disabled=true;btn.textContent='提交中...';
+  document.getElementById('del-status').textContent='正在获取当前数据...';
+  
+  try{
+    var idsToDelete=new Set(selected);
+    
+    // 1. Get current file from GitHub
+    var url=getGithubApiUrl(repoOwner,repoName,jsonPath);
+    var resp=await fetch(url+'?t='+Date.now(),{headers:{'Authorization':'token '+token,'Accept':'application/vnd.github.v3+json'}});
+    if(!resp.ok){var err=await resp.json();throw new Error(err.message||'获取失败');}
+    var fileData=await resp.json();
+    
+    // 2. Parse current data
+    var currentJson=atob(fileData.content);
+    var data=JSON.parse(currentJson);
+    
+    // 3. Filter out deleted comics
+    var before=data.comics.length;
+    data.comics=data.comics.filter(function(c){return !idsToDelete.has(String(c.id));});
+    var after=data.comics.length;
+    var deletedCount=before-after;
+    
+    if(deletedCount===0){document.getElementById('del-status').textContent='没有匹配到要删除的漫画（可能已被删除）';btn.disabled=false;btn.textContent='确认删除并提交';return;}
+    
+    // 4. Recalculate tag/author counts
+    var tagCount={}, authorCount={};
+    for(var i=0;i<data.comics.length;i++){
+      var c=data.comics[i];
+      if(c.author&&c.author!=='')authorCount[c.author]=(authorCount[c.author]||0)+1;
+      for(var j=0;j<c.tags.length;j++)tagCount[c.tags[j]]=(tagCount[c.tags[j]]||0)+1;
+    }
+    data.tags=[];
+    for(var name in tagCount)data.tags.push({name:name,count:tagCount[name]});
+    data.tags.sort(function(a,b){return b.count-a.count});
+    data.authors=[];
+    for(var name in authorCount)data.authors.push({name:name,count:authorCount[name]});
+    data.authors.sort(function(a,b){return b.count-a.count});
+    
+    // 5. Encode and push
+    var newJson=JSON.stringify(data, null, 2); // pretty print
+    var encoded=btoa(unescape(encodeURIComponent(newJson)));
+    
+    document.getElementById('del-status').textContent='正在提交更改 ('+deletedCount+' 本)...';
+    
+    var putResp=await fetch(url,{
+      method:'PUT',
+      headers:{'Authorization':'token '+token,'Content-Type':'application/json','Accept':'application/vnd.github.v3+json'},
+      body:JSON.stringify({
+        message:'Delete '+deletedCount+' comic(s) via gallery UI',
+        content:encoded,
+        sha:fileData.sha
+      })
+    });
+    
+    if(!putResp.ok){var putErr=await putResp.json();throw new Error(putErr.message||'提交失败');}
+    
+    document.getElementById('del-status').textContent='✅ 成功删除 '+deletedCount+' 本！页面即将刷新...';
+    btn.textContent='✅ 完成';
+    
+    // Clear selection
+    selected.clear();
+    
+    // Wait a moment then refresh
+    setTimeout(function(){location.reload();},2000);
+    
+  }catch(e){
+    document.getElementById('del-status').textContent='❌ 错误: '+e.message;
+    btn.disabled=false;btn.textContent='确认删除并提交';
+  }
+}
+
+// ── Init ──
 fetch('comics.json').then(function(r){return r.json()}).then(function(d){
   ALL_DATA=d;allComics=d.comics;allTags=d.tags;allAuthors=d.authors;
   document.getElementById('loading').style.display='none';
