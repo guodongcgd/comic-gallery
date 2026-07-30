@@ -425,8 +425,9 @@ async function loadViaContentsAPI(){
 })();
 
 // ── PikPak Download ──
-// API_BASE empty = same origin (auto-detect Pages Function)
-var API_BASE = '';
+// API_BASE = Tunnel URL for local PikPak download server
+// Change to '' to use Cloudflare Pages Function instead
+var API_BASE = 'https://not-establishment-ebooks-ourselves.trycloudflare.com';
 var PP_STATE_KEY = 'pikpak_downloads';
 
 function getPikPakState(){
@@ -447,7 +448,7 @@ function updatePikPakBtn(el){
     el.textContent='📖 阅读';el.onclick=function(){window.open(s.share_url,'_blank')};
   }else if(s&&(s.status==='loading'||s.status==='queued')){
     el.style.background='#b4530915';el.style.color='#fbbf24';el.style.border='1px solid #b4530940';
-    el.textContent='📥 下载中...';el.onclick=null;
+    el.textContent='📥 '+(s.progress||'下载中...');el.onclick=null;
   }else if(s&&s.status==='error'){
     el.style.background='#ef444415';el.style.color='#ef4444';el.style.border='1px solid #ef444440';
     el.textContent='❌ 重试';el.onclick=function(){handlePikPakClick(this)};
@@ -468,12 +469,12 @@ async function handlePikPakClick(el){
   if(s&&(s.status==='queued'||s.status==='loading'))return;
 
   // Show loading state
-  state[id]={status:'loading',progress:'下载中...'};
+  state[id]={status:'loading',progress:'连接服务器...'};
   savePikPakState(state);
   updatePikPakBtn(el);
 
   try{
-    var r=await fetch('/api/download',{
+    var r=await fetch(API_BASE+'/api/download',{
       method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({
@@ -485,13 +486,44 @@ async function handlePikPakClick(el){
       })
     });
     var d=await r.json();
-    if(d.share_url){
-      state[id]={status:'completed',share_url:d.share_url,progress:'完成'};
-      savePikPakState(state);
-      updatePikPakBtn(el);
-    }else{
-      throw new Error(d.error||'下载失败');
-    }
+    if(!d.task_id) throw new Error(d.error||'服务器返回异常');
+
+    state[id]={status:'loading',progress:'排队中...',taskId:d.task_id};
+    savePikPakState(state);
+    updatePikPakBtn(el);
+
+    // Poll for status
+    var maxWait=600; // max 10 min
+    var waited=0;
+    var pollTimer=setInterval(async function(){
+      try{
+        var pr=await fetch(API_BASE+'/api/download/'+d.task_id);
+        var pd=await pr.json();
+        waited+=3;
+        state=getPikPakState();
+        if(pd.status==='completed'){
+          clearInterval(pollTimer);
+          state[id]={status:'completed',share_url:pd.share_url||'',progress:'完成'};
+          savePikPakState(state);
+          updatePikPakBtn(el);
+        }else if(pd.status==='error'){
+          clearInterval(pollTimer);
+          state[id]={status:'error',progress:pd.progress||'下载失败'};
+          savePikPakState(state);
+          updatePikPakBtn(el);
+        }else if(waited>maxWait){
+          clearInterval(pollTimer);
+          state[id]={status:'error',progress:'超时'};
+          savePikPakState(state);
+          updatePikPakBtn(el);
+        }else{
+          state[id]={status:'loading',progress:pd.progress||'下载中...',taskId:d.task_id};
+          savePikPakState(state);
+          // Don't update button text every poll (keeps "下载中...")
+        }
+      }catch(e){/* poll error, retry */}
+    },3000);
+
   }catch(e){
     state[id]={status:'error',progress:e.message};
     savePikPakState(state);
