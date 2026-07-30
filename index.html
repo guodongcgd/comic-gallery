@@ -275,8 +275,6 @@ function showDeleteModal(){
 
 function closeModal(){document.getElementById('modal-overlay').style.display='none';}
 
-function getGithubApiUrl(path){return 'https://api.github.com/repos/'+repoOwner+'/'+repoName+'/contents/'+path;}
-
 async function confirmDelete(){
   var token=document.getElementById('token-input').value.trim();
   if(!token){document.getElementById('del-status').textContent='请输入 GitHub Token';return;}
@@ -285,67 +283,72 @@ async function confirmDelete(){
   btn.disabled=true;btn.textContent='提交中...';
   document.getElementById('del-status').textContent='正在获取当前数据...';
   
+  async function gh(method,path,body){
+    var opts={method:method,headers:{'Authorization':'token '+token,'Accept':'application/vnd.github.v3+json'}};
+    if(body)opts.body=JSON.stringify(body);
+    var r=await fetch('https://api.github.com/repos/'+repoOwner+'/'+repoName+'/'+path,opts);
+    if(!r.ok){var t=await r.text();throw new Error('HTTP '+r.status+': '+(t.slice(0,200)||'empty'));}
+    return r.json();
+  }
+  
   try{
     var idsToDelete=new Set(selected);
     
-    // 1. Get current file from GitHub
-    var url=getGithubApiUrl(jsonPath);
-    var resp=await fetch(url+'?t='+Date.now(),{headers:{'Authorization':'token '+token,'Accept':'application/vnd.github.v3+json'}});
-    if(!resp.ok){var errText=await resp.text();throw new Error('HTTP '+resp.status+': '+(errText||'empty'));}
-    var fileData=await resp.json();
-    if(!fileData.content)throw new Error('响应中没有文件内容');
+    // 1. Get raw file via raw.githubusercontent.com (no size limit)
+    document.getElementById('del-status').textContent='获取当前数据...';
+    var rawResp=await fetch('https://raw.githubusercontent.com/'+repoOwner+'/'+repoName+'/main/'+jsonPath+'?t='+Date.now());
+    if(!rawResp.ok)throw new Error('获取文件失败: HTTP '+rawResp.status);
+    var rawText=await rawResp.text();
+    var data=JSON.parse(rawText);
     
-    // 2. Parse current data
-    var currentJson=decodeURIComponent(escape(atob(fileData.content)));
-    var data=JSON.parse(currentJson);
-    
-    // 3. Filter out deleted comics
+    // 2. Filter
     var before=data.comics.length;
     data.comics=data.comics.filter(function(c){return !idsToDelete.has(String(c.id));});
     var after=data.comics.length;
     var deletedCount=before-after;
+    if(deletedCount===0){document.getElementById('del-status').textContent='没有匹配到要删除的漫画';btn.disabled=false;btn.textContent='确认删除并提交';return;}
     
-    if(deletedCount===0){document.getElementById('del-status').textContent='没有匹配到要删除的漫画（可能已被删除）';btn.disabled=false;btn.textContent='确认删除并提交';return;}
-    
-    // 4. Recalculate tag/author counts
+    // 3. Recalculate counts
     var tagCount={}, authorCount={};
     for(var i=0;i<data.comics.length;i++){
       var c=data.comics[i];
       if(c.author&&c.author!=='')authorCount[c.author]=(authorCount[c.author]||0)+1;
       for(var j=0;j<c.tags.length;j++)tagCount[c.tags[j]]=(tagCount[c.tags[j]]||0)+1;
     }
-    data.tags=[];
-    for(var name in tagCount)data.tags.push({name:name,count:tagCount[name]});
+    data.tags=[];for(var n in tagCount)data.tags.push({name:n,count:tagCount[n]});
     data.tags.sort(function(a,b){return b.count-a.count});
-    data.authors=[];
-    for(var name in authorCount)data.authors.push({name:name,count:authorCount[name]});
+    data.authors=[];for(var n in authorCount)data.authors.push({name:n,count:authorCount[n]});
     data.authors.sort(function(a,b){return b.count-a.count});
     
-    // 5. Encode and push
+    // 4. Create blob with new content
+    document.getElementById('del-status').textContent='创建 blob ('+deletedCount+' 本)...';
     var newJson=JSON.stringify(data);
     var encoded=btoa(unescape(encodeURIComponent(newJson)));
+    var blob=await gh('POST','git/blobs',{content:encoded,encoding:'base64'});
     
-    document.getElementById('del-status').textContent='正在提交更改 ('+deletedCount+' 本)...';
+    // 5. Get current ref + commit tree
+    var ref=await gh('GET','git/refs/heads/main');
+    var commit=await gh('GET','git/commits/'+ref.object.sha);
     
-    var putResp=await fetch(url,{
-      method:'PUT',
-      headers:{'Authorization':'token '+token,'Content-Type':'application/json','Accept':'application/vnd.github.v3+json'},
-      body:JSON.stringify({
-        message:'Delete '+deletedCount+' comic(s) via gallery UI',
-        content:encoded,
-        sha:fileData.sha
-      })
+    // 6. Create new tree with updated file
+    var newTree=await gh('POST','git/trees',{
+      base_tree:commit.tree.sha,
+      tree:[{path:jsonPath,mode:'100644',type:'blob',sha:blob.sha}]
     });
     
-    if(!putResp.ok){var putErrText=await putResp.text();throw new Error('提交失败 HTTP '+putResp.status+': '+(putErrText||'empty'));}
+    // 7. Create commit
+    var newCommit=await gh('POST','git/commits',{
+      message:'Delete '+deletedCount+' comic(s) via gallery UI',
+      tree:newTree.sha,
+      parents:[ref.object.sha]
+    });
+    
+    // 8. Update ref
+    await gh('PATCH','git/refs/heads/main',{sha:newCommit.sha,force:false});
     
     document.getElementById('del-status').textContent='✅ 成功删除 '+deletedCount+' 本！页面即将刷新...';
     btn.textContent='✅ 完成';
-    
-    // Clear selection
     selected.clear();
-    
-    // Wait a moment then refresh
     setTimeout(function(){location.reload();},2000);
     
   }catch(e){
