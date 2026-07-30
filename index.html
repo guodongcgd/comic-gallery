@@ -100,6 +100,9 @@ h1{color:#fbbf24;font-size:1.3rem;margin:0;cursor:pointer}
 <ul class="del-list" id="del-list"></ul>
 <p style="font-size:.75rem">⚠️ 操作不可撤销！删除后需输入 GitHub Token 提交更改。</p>
 <input type="password" id="token-input" placeholder="输入 GitHub Token (ghp_...)" autocomplete="off">
+<label style="color:#a8a29e;font-size:.75rem;display:flex;align-items:center;gap:6px;margin:4px 0">
+  <input type="checkbox" id="save-token" checked> 记住 Token（存 localStorage）
+</label>
 <p id="del-status" style="color:#fbbf24;font-size:.8rem"></p>
 <div class="btn-row">
 <button style="background:#2a2420;color:#a8a29e" onclick="closeModal()">取消</button>
@@ -279,23 +282,20 @@ async function confirmDelete(){
   var token=document.getElementById('token-input').value.trim();
   if(!token){document.getElementById('del-status').textContent='请输入 GitHub Token';return;}
   
+  // Save token if checkbox checked
+  if(document.getElementById('save-token').checked){
+    localStorage.setItem('gh_token', token);
+  }
+  
   var btn=document.getElementById('del-confirm-btn');
   btn.disabled=true;btn.textContent='提交中...';
-  
-  async function gh(method,path,body){
-    var opts={method:method,headers:{'Authorization':'token '+token,'Accept':'application/vnd.github.v3+json'}};
-    if(body)opts.body=JSON.stringify(body);
-    var r=await fetch('https://api.github.com/repos/'+repoOwner+'/'+repoName+'/'+path,opts);
-    if(!r.ok){var t=await r.text();throw new Error('HTTP '+r.status+': '+(t.slice(0,200)||'empty'));}
-    return r.json();
-  }
   
   try{
     var idsToDelete=new Set(selected);
     
-    // Use in-memory data (avoid CDN cache issues with raw.githubusercontent.com)
+    // Use in-memory data (deep copy)
     document.getElementById('del-status').textContent='处理数据...';
-    var data=JSON.parse(JSON.stringify(ALL_DATA)); // deep copy
+    var data=JSON.parse(JSON.stringify(ALL_DATA));
     
     // Filter
     var before=data.comics.length;
@@ -320,27 +320,27 @@ async function confirmDelete(){
     document.getElementById('del-status').textContent='提交到 GitHub ('+deletedCount+' 本)...';
     var newJson=JSON.stringify(data);
     var encoded=btoa(unescape(encodeURIComponent(newJson)));
-    var blob=await gh('POST','git/blobs',{content:encoded,encoding:'base64'});
+    var blob=await ghCall('POST','git/blobs',{content:encoded,encoding:'base64'},token);
     
     // Get current ref + commit tree
-    var ref=await gh('GET','git/refs/heads/main');
-    var commit=await gh('GET','git/commits/'+ref.object.sha);
+    var ref=await ghCall('GET','git/refs/heads/main',null,token);
+    var commit=await ghCall('GET','git/commits/'+ref.object.sha,null,token);
     
     // Create new tree with updated file
-    var newTree=await gh('POST','git/trees',{
+    var newTree=await ghCall('POST','git/trees',{
       base_tree:commit.tree.sha,
       tree:[{path:jsonPath,mode:'100644',type:'blob',sha:blob.sha}]
-    });
+    },token);
     
     // Create commit
-    var newCommit=await gh('POST','git/commits',{
+    var newCommit=await ghCall('POST','git/commits',{
       message:'Delete '+deletedCount+' comic(s) via gallery UI',
       tree:newTree.sha,
       parents:[ref.object.sha]
-    });
+    },token);
     
     // Update ref
-    await gh('PATCH','git/refs/heads/main',{sha:newCommit.sha,force:false});
+    await ghCall('PATCH','git/refs/heads/main',{sha:newCommit.sha,force:false},token);
     
     // Update in-memory data immediately so UI reflects changes
     ALL_DATA=data;
@@ -361,18 +361,52 @@ async function confirmDelete(){
   }
 }
 
-// ── Init ──
-fetch('comics.json').then(function(r){return r.json()}).then(function(d){
+// ── GitHub API helper ──
+async function ghCall(method,apiPath,body,token){
+  var opts={method:method,headers:{'Authorization':'token '+token,'Accept':'application/vnd.github.v3+json'}};
+  if(body)opts.body=JSON.stringify(body);
+  var r=await fetch('https://api.github.com/repos/'+repoOwner+'/'+repoName+'/'+apiPath,opts);
+  if(!r.ok){var t=await r.text();throw new Error('HTTP '+r.status+': '+(t.slice(0,200)||'empty'));}
+  return r.json();
+}
+
+async function loadFromGitHub(token){
+  var ref=await ghCall('GET','git/refs/heads/main',null,token);
+  var commit=await ghCall('GET','git/commits/'+ref.object.sha,null,token);
+  var tree=await ghCall('GET','git/trees/'+commit.tree.sha,null,token);
+  var fi=null;for(var i=0;i<tree.tree.length;i++){if(tree.tree[i].path==jsonPath){fi=tree.tree[i];break;}}
+  if(!fi)throw new Error('File not found');
+  var blob=await ghCall('GET','git/blobs/'+fi.sha,null,token);
+  return JSON.parse(decodeURIComponent(escape(atob(blob.content))));
+}
+
+function applyData(d){
   ALL_DATA=d;allComics=d.comics;allTags=d.tags;allAuthors=d.authors;
   document.getElementById('loading').style.display='none';
   document.getElementById('acnt').textContent='('+allAuthors.length+')';
   document.getElementById('tcnt').textContent='('+allTags.length+')';
   updateButtons();applyFilter();
-}).catch(function(e){
-  document.getElementById('loading').style.display='none';
-  document.getElementById('error').style.display='block';
-  document.getElementById('error').textContent='加载失败: '+e;
-});
+}
+
+// ── Init ──
+(async function(){
+  var savedToken=localStorage.getItem('gh_token');
+  var loaded=false;
+  if(savedToken){
+    try{document.getElementById('loading').textContent='正在加载最新数据...';
+      var d=await loadFromGitHub(savedToken);applyData(d);loaded=true;
+    }catch(e){console.log('GitHub API error, fallback to CDN',e);}
+  }
+  if(!loaded){
+    fetch('comics.json?'+Date.now()).then(function(r){return r.json()}).then(function(d){
+      applyData(d);
+    }).catch(function(e){
+      document.getElementById('loading').style.display='none';
+      document.getElementById('error').style.display='block';
+      document.getElementById('error').textContent='加载失败: '+e;
+    });
+  }
+})();
 </script>
 </body>
 </html>
