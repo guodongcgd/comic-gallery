@@ -274,6 +274,9 @@ function updateDelBar(){
 
 function showDeleteModal(){
   if(selected.size===0)return;
+  // Reset confirm button state
+  var btn=document.getElementById('del-confirm-btn');
+  btn.disabled=false;btn.textContent='确认删除';
   var list=document.getElementById('del-list');list.innerHTML='';
   var count=0;
   for(var i=0;i<allComics.length;i++){
