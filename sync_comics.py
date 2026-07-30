@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """
-Sync new comics from api-comic.labs.gay to comic-gallery.
-Compares by posted timestamp, adds only new comics.
-Updates comics.json, commits and pushes to GitHub.
+Sync new comics from api-comic.labs.gay to Cloudflare D1 database.
+Fetches new comics, posts them to /api/comics (D1-backed endpoint).
+No more comics.json file updates needed.
 """
-
 import json
 import os
 import re
-import subprocess
 import sys
 import time
 from datetime import datetime
@@ -17,8 +15,9 @@ from pathlib import Path
 import httpx
 
 API_BROWSE = "https://api-comic.labs.gay/api/browse?indexUid=gaylabs"
+GALLERY_API = "https://comic-gallery.pages.dev/api/comics"
 REPO_DIR = Path("/home/agentuser/comic-gallery")
-JSON_PATH = "comics.json"
+JSON_PATH = "comics.json"  # local fallback
 GIT_TOKEN_FILE = Path("/home/agentuser/.hermes/.github_token")
 
 
@@ -26,35 +25,8 @@ def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
 
-def load_current_data():
-    """Load existing comics.json from local file first, fallback to GitHub raw."""
-    local_path = REPO_DIR / JSON_PATH
-    if local_path.exists():
-        with open(local_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        if data.get("comics"):
-            log(f"Loaded {len(data['comics'])} comics from local file")
-            return data
-
-    url = "https://raw.githubusercontent.com/guodongcgd/comic-gallery/main/comics.json"
-    resp = httpx.get(url, timeout=30, follow_redirects=True)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def get_latest_date(data):
-    """Get the latest published_at date from existing comics."""
-    dates = []
-    for c in data.get("comics", []):
-        d = c.get("published_at", "").strip()
-        if d:
-            dates.append(d)
-    dates.sort(reverse=True)
-    return dates[0] if dates else "2020-01-01 00:00"
-
-
-def parse_date_for_cmp(date_str):
-    """Parse date string for comparison. Returns timestamp int."""
+def parse_date_ts(date_str):
+    """Parse date string to timestamp."""
     date_str = date_str.strip()
     for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"]:
         try:
@@ -65,16 +37,37 @@ def parse_date_for_cmp(date_str):
     return 0
 
 
+def get_latest_date_from_d1():
+    """Get the latest published_at from D1 via API."""
+    try:
+        # Use stats endpoint to find latest date
+        # Actually, let's fetch the first page (sorted by id DESC) to get the latest
+        resp = httpx.get(f"{GALLERY_API}?page=1&size=1", timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        comics = data.get("comics", [])
+        if comics:
+            return comics[0].get("published_at", "2020-01-01 00:00")
+        return "2020-01-01 00:00"
+    except Exception as e:
+        log(f"Error getting latest date from D1: {e}")
+        # Fallback: check local comics.json
+        local_path = REPO_DIR / JSON_PATH
+        if local_path.exists():
+            with open(local_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            dates = [c.get("published_at", "").strip() for c in data.get("comics", []) if c.get("published_at")]
+            dates.sort(reverse=True)
+            return dates[0] if dates else "2020-01-01 00:00"
+        return "2020-01-01 00:00"
+
+
 def extract_author(title_jp):
-    """Extract author name from title like [Author Name] ..."""
     m = re.match(r'^\[([^\]]+)\]', title_jp)
-    if m:
-        return m.group(1).strip()
-    return ""
+    return m.group(1).strip() if m else ""
 
 
 def extract_tags(category_path_zh):
-    """Extract simple tags from category_path_zh (take the part after '> ')."""
     tags = []
     for path in category_path_zh:
         parts = path.split("> ")
@@ -86,57 +79,41 @@ def extract_tags(category_path_zh):
 
 
 def extract_title_cn(title_jp, title_en):
-    """Extract Chinese title from various formats."""
-    # Try to get Chinese part after ︱ or | separator
+    # Try separator
     for sep in ["︱", "|", "｜"]:
         if sep in title_jp:
             after = title_jp.split(sep, 1)[1]
-            # Remove tags like [Chinese][单][单行本]
             after = re.sub(r'\[.*?\]', '', after).strip()
             if after:
                 return after
-
-    # Try from title_en
     for sep in ["︱", "|", "｜"]:
         if sep in title_en:
             after = title_en.split(sep, 1)[1]
             after = re.sub(r'\[.*?\]', '', after).strip()
             if after:
                 return after
-
-    # Fallback: use title_en without author prefix and tags
     title = title_en
     title = re.sub(r'^\[[^\]]*\]\s*', '', title)
-    title = re.sub(r'\s*\[.*?\]', '', title)
-    title = title.strip()
+    title = re.sub(r'\s*\[.*?\]', '', title).strip()
     if title:
         return title
-
-    # Last resort
     return title_jp[:60] if len(title_jp) > 60 else title_jp
 
 
 def extract_title_original(title_jp):
-    """Clean up the original title."""
-    title = title_jp.strip()
-    # Remove trailing tags like [Chinese][単][単行本]
-    title = re.sub(r'\s*\[[^\]]*\]\s*$', '', title)
-    return title
+    return re.sub(r'\s*\[[^\]]*\]\s*$', '', title_jp.strip())
 
 
-def fetch_all_new_comics(latest_date_ts, limit=100):
-    """
-    Fetch all comics newer than latest_date_ts from the API.
-    Returns list of comics sorted by postedTimestamp descending.
-    """
+def fetch_all_new_comics(latest_date_ts, limit=200):
+    """Fetch all comics newer than latest_date_ts."""
     new_comics = []
     page = 1
-    hits_per_page = 200  # Max per page
+    hits_per_page = 200
 
     while True:
         url = f"{API_BROWSE}&query=&page={page}&hitsPerPage={hits_per_page}&includeFacets=false"
         log(f"Fetching page {page}...")
-        
+
         try:
             resp = httpx.get(url, timeout=30)
             resp.raise_for_status()
@@ -153,42 +130,45 @@ def fetch_all_new_comics(latest_date_ts, limit=100):
             ts = hit.get("postedTimestamp", 0)
             if ts > latest_date_ts:
                 new_comics.append(hit)
-            # Since results are sorted newest-first, once we hit old enough,
-            # remaining pages will also be old
-            # But we can't break because pagination continues
 
         total_pages = data.get("totalPages", 1)
         log(f"  Got {len(hits)} hits, {len(new_comics)} new so far (page {page}/{total_pages})")
 
         if page >= total_pages:
             break
-
-        # If the last hit is older than our cutoff, remaining pages are all old
         if hits and hits[-1].get("postedTimestamp", 0) <= latest_date_ts:
             log(f"  Reached cutoff at page {page}, stopping")
             break
 
         page += 1
-
-        # Be polite to API
         time.sleep(0.5)
-
         if len(new_comics) >= limit:
-            log(f"  Reached limit of {limit} new comics")
+            log(f"  Reached limit of {limit}")
             break
 
-    # Sort by postedTimestamp ascending (oldest first for proper ID assignment)
     new_comics.sort(key=lambda x: x.get("postedTimestamp", 0))
     return new_comics
 
 
+def get_next_id():
+    """Get the next available ID from D1."""
+    try:
+        resp = httpx.get(f"{GALLERY_API}?page=1&size=1", timeout=15)
+        resp.raise_for_status()
+        data = resp.json()
+        comics = data.get("comics", [])
+        if comics:
+            return int(comics[0]["id"]) + 1  # sorted DESC by id
+        return 1
+    except:
+        return 1
+
+
 def map_to_gallery_format(api_comics, next_id):
-    """Map API comic format to gallery format."""
     gallery_comics = []
     for ac in api_comics:
         title_jp = ac.get("title_jp", "")
         title_en = ac.get("title", "")
-
         gallery_comics.append({
             "id": next_id,
             "title_cn": extract_title_cn(title_jp, title_en),
@@ -206,88 +186,48 @@ def map_to_gallery_format(api_comics, next_id):
     return gallery_comics
 
 
-def recalculate_meta(comics):
-    """Recalculate tags and authors arrays from comics list."""
-    tag_count = {}
-    author_count = {}
-    for c in comics:
-        author = c.get("author", "")
-        if author:
-            author_count[author] = author_count.get(author, 0) + 1
-        for tag in c.get("tags", []):
-            tag_count[tag] = tag_count.get(tag, 0) + 1
+def post_to_d1(comics):
+    """POST new comics to D1-backed API in batches."""
+    batch_size = 50
+    total = len(comics)
+    added = 0
+    skipped = 0
 
-    new_tags = sorted(
-        [{"name": k, "count": v} for k, v in tag_count.items()],
-        key=lambda x: -x["count"]
-    )
-    new_authors = sorted(
-        [{"name": k, "count": v} for k, v in author_count.items()],
-        key=lambda x: -x["count"]
-    )
-    return new_tags, new_authors
+    for i in range(0, total, batch_size):
+        batch = comics[i:i + batch_size]
+        try:
+            resp = httpx.post(
+                GALLERY_API,
+                json={"comics": batch},
+                timeout=60,
+            )
+            resp.raise_for_status()
+            result = resp.json()
+            added += result.get("added", len(batch))
+        except Exception as e:
+            log(f"Error posting batch {i//batch_size}: {e}")
+            # Check if it's a duplicate (HTTP 500 but might be partial)
+            skipped += len(batch)
 
+        if (i + batch_size) % 200 == 0:
+            log(f"  Posted {min(i + batch_size, total)}/{total}...")
 
-def write_and_push(data):
-    """Write updated comics.json to repo, commit, push."""
-    json_path = REPO_DIR / JSON_PATH
-
-    log(f"Writing {len(data['comics'])} comics to {json_path}")
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=1)
-
-    # Git operations
-    token = ""
-    if GIT_TOKEN_FILE.exists():
-        token = GIT_TOKEN_FILE.read_text().strip()
-
-    if not token:
-        token = os.environ.get("GITHUB_TOKEN", "")
-        if not token:
-            log("WARNING: No GitHub token found, skipping push")
-            return
-
-    os.chdir(str(REPO_DIR))
-    subprocess.run(["git", "add", JSON_PATH], check=True)
-    subprocess.run(
-        ["git", "commit", "-m", f"sync: auto-add {len(data['comics'])} comics from labs.gay"],
-        check=False,
-    )
-
-    # Push with token auth
-    remote = f"https://guodongcgd:{token}@github.com/guodongcgd/comic-gallery.git"
-    result = subprocess.run(
-        ["git", "push", remote],
-        capture_output=True, text=True, timeout=60
-    )
-    if result.returncode != 0:
-        log(f"Push stderr: {result.stderr[:200]}")
-        # Fallback: pull rebase and retry
-        log("Pull rebase and retry...")
-        subprocess.run(["git", "pull", "--rebase", remote], check=False, timeout=30)
-        subprocess.run(["git", "push", remote], check=False, timeout=60)
-
-    log("Push complete")
+    log(f"Posted {added} comics to D1")
+    return added
 
 
 def main():
     log("=" * 50)
-    log("Starting comic sync from labs.gay")
+    log("Starting comic sync from labs.gay → D1")
 
-    # Load current data
-    log("Loading current data...")
-    data = load_current_data()
-    comics = data.get("comics", [])
-    log(f"Current: {len(comics)} comics")
-
-    # Find latest date
-    latest_date = get_latest_date(data)
-    latest_ts = parse_date_for_cmp(latest_date)
-    log(f"Latest comic date: {latest_date} (ts={latest_ts})")
+    # Get latest date from D1
+    latest_date = get_latest_date_from_d1()
+    latest_ts = parse_date_ts(latest_date)
+    log(f"Latest comic date from D1: {latest_date} (ts={latest_ts})")
 
     # Fetch new comics from API
     log("Fetching new comics from API...")
-    api_new = fetch_all_new_comics(latest_ts, limit=500)
+    api_new = fetch_all_new_comics(latest_ts, limit=200)
 
     if not api_new:
         log("No new comics found!")
@@ -295,51 +235,66 @@ def main():
 
     log(f"Found {len(api_new)} new comics on API")
 
+    # Get next ID
+    next_id = get_next_id()
+    log(f"Next available ID: {next_id}")
+
     # Map to gallery format
-    next_id = max((c.get("id", 0) for c in comics), default=0) + 1
     new_gallery = map_to_gallery_format(api_new, next_id)
     log(f"Mapped {len(new_gallery)} comics (IDs {next_id}-{next_id + len(new_gallery) - 1})")
 
-    # Merge, avoiding duplicates by telegram_url
-    existing_urls = set()
-    for c in comics:
-        url = c.get("telegram_url", "") or c.get("telegraph_url", "")
-        if url:
-            existing_urls.add(url)
-
-    deduped_new = []
-    for c in new_gallery:
-        url = c.get("telegram_url", "") or c.get("telegraph_url", "")
-        if url and url in existing_urls:
-            continue
-        deduped_new.append(c)
-        if url:
-            existing_urls.add(url)
-
-    if not deduped_new:
-        log("All new comics already exist (duplicates), nothing to add!")
-        return
-
-    all_comics = comics + deduped_new
-    log(f"Total comics: {len(all_comics)} (added {len(deduped_new)} new)")
-
-    # Recalculate meta
-    new_tags, new_authors = recalculate_meta(all_comics)
-    log(f"Tags: {len(new_tags)}, Authors: {len(new_authors)}")
-
-    # Build output data
-    output = {
-        "comics": all_comics,
-        "tags": new_tags,
-        "authors": new_authors,
-    }
-
-    # Write and push
-    write_and_push(output)
+    # Post to D1
+    added = post_to_d1(new_gallery)
 
     log("=" * 50)
-    log(f"Sync complete! Added {len(new_gallery)} comics")
-    log(f"Now {len(all_comics)} total comics")
+    log(f"Sync complete! Added {added} new comics to D1")
+    log(f"Visit: {GALLERY_API}")
+
+    # Also update local comics.json for fallback
+    local_path = REPO_DIR / JSON_PATH
+    if local_path.exists():
+        try:
+            with open(local_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            existing_ids = {c["id"] for c in data.get("comics", [])}
+            really_new = [c for c in new_gallery if c["id"] not in existing_ids]
+            if really_new:
+                data["comics"].extend(really_new)
+                # Recalc meta
+                tag_count = {}
+                author_count = {}
+                for c in data["comics"]:
+                    author = c.get("author", "")
+                    if author:
+                        author_count[author] = author_count.get(author, 0) + 1
+                    for tag in c.get("tags", []):
+                        tag_count[tag] = tag_count.get(tag, 0) + 1
+                data["tags"] = sorted(
+                    [{"name": k, "count": v} for k, v in tag_count.items()],
+                    key=lambda x: -x["count"]
+                )
+                data["authors"] = sorted(
+                    [{"name": k, "count": v} for k, v in author_count.items()],
+                    key=lambda x: -x["count"]
+                )
+                with open(local_path, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=1)
+                log(f"Updated local {JSON_PATH} ({len(data['comics'])} comics)")
+
+                # Also push to GitHub for fallback
+                token = ""
+                if GIT_TOKEN_FILE.exists():
+                    token = GIT_TOKEN_FILE.read_text().strip()
+                if token:
+                    os.chdir(str(REPO_DIR))
+                    import subprocess
+                    subprocess.run(["git", "add", JSON_PATH], check=False)
+                    subprocess.run(["git", "commit", "-m", f"sync: auto-add {len(really_new)} comics to D1 [{datetime.now().strftime('%Y-%m-%d')}]"], check=False)
+                    remote = f"https://guodongcgd:{token}@github.com/guodongcgd/comic-gallery.git"
+                    subprocess.run(["git", "push", remote], check=False, timeout=60)
+                    log("Pushed updated comics.json to GitHub")
+        except Exception as e:
+            log(f"Warning: Could not update local comics.json: {e}")
 
 
 if __name__ == "__main__":
