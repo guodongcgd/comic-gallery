@@ -275,7 +275,7 @@ function showDeleteModal(){
 
 function closeModal(){document.getElementById('modal-overlay').style.display='none';}
 
-function getGithubApiUrl(repo,path){return 'https://api.github.com/repos/'+repoOwner+'/'+repoName+'/contents/'+path;}
+function getGithubApiUrl(path){return 'https://api.github.com/repos/'+repoOwner+'/'+repoName+'/contents/'+path;}
 
 async function confirmDelete(){
   var token=document.getElementById('token-input').value.trim();
@@ -289,7 +289,7 @@ async function confirmDelete(){
     var idsToDelete=new Set(selected);
     
     // 1. Get current file from GitHub
-    var url=getGithubApiUrl(repoOwner,repoName,jsonPath);
+    var url=getGithubApiUrl(jsonPath);
     var resp=await fetch(url+'?t='+Date.now(),{headers:{'Authorization':'token '+token,'Accept':'application/vnd.github.v3+json'}});
     if(!resp.ok){var err=await resp.json();throw new Error(err.message||'获取失败');}
     var fileData=await resp.json();
