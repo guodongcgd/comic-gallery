@@ -154,6 +154,15 @@ function renderCard(c){
   var lk=document.createElement('div');lk.className='lk';
   if(c.telegraph_url){var tp=document.createElement('a');tp.href=c.telegraph_url;tp.target='_blank';tp.className='lb tp';tp.textContent='📖 阅读';lk.appendChild(tp);}
   if(c.telegram_url){var tl=document.createElement('a');tl.href=c.telegram_url;tl.target='_blank';tl.className='lb tg';tl.textContent='📱 Telegram';lk.appendChild(tl);}
+  // PikPak download button
+  var pb=document.createElement('span');pb.className='lb';pb.style.cursor='pointer';
+  pb.dataset.comicId=c.id;pb.dataset.url=c.telegraph_url||'';
+  pb.dataset.title=c.title_cn||c.title_original||'';
+  pb.dataset.titleOrig=c.title_original||'';
+  pb.dataset.pages=c.pages||0;
+  updatePikPakBtn(pb);
+  pb.onclick=function(){handlePikPakClick(this)};
+  lk.appendChild(pb);
   di.appendChild(lk);
   cd.appendChild(di);
   return cd;
@@ -412,6 +421,125 @@ async function loadViaContentsAPI(){
     document.getElementById('loading').style.display='none';
     document.getElementById('error').style.display='block';
     document.getElementById('error').textContent='加载失败: '+e;
+  }
+})();
+
+// ── PikPak Download ──
+var API_BASE = localStorage.getItem('pikpak_api_url') || 'http://127.0.0.1:8899';
+var PP_STATE_KEY = 'pikpak_downloads';
+
+function getPikPakState(){
+  try{return JSON.parse(localStorage.getItem(PP_STATE_KEY)||'{}')}catch(e){return {}}
+}
+function savePikPakState(s){
+  localStorage.setItem(PP_STATE_KEY,JSON.stringify(s));
+}
+
+function updatePikPakBtn(el){
+  var id=el.dataset.comicId;
+  if(!id||!el.dataset.url){el.style.display='none';return}
+  el.style.display='inline-block';
+  var state=getPikPakState();
+  var s=state[id];
+  if(s&&s.status==='completed'){
+    el.style.background='#fbbf2415';el.style.color='#fbbf24';el.style.border='1px solid #fbbf2440';
+    el.textContent='📖 阅读';el.onclick=function(){window.open(s.share_url,'_blank')};
+  }else if(s&&(s.status==='downloading'||s.status==='queued')){
+    el.style.background='#b4530915';el.style.color='#fbbf24';el.style.border='1px solid #b4530940';
+    el.textContent='📥 '+(s.progress||'排队中...');
+  }else if(s&&s.status==='error'){
+    el.style.background='#ef444415';el.style.color='#ef4444';el.style.border='1px solid #ef444440';
+    el.textContent='❌ 重试';
+  }else{
+    el.style.background='#22c55e15';el.style.color='#22c55e';el.style.border='1px solid #22c55e40';
+    el.textContent='📥 PikPak';
+  }
+}
+
+async function pollTask(el,taskId){
+  var id=el.dataset.comicId;
+  var maxAttempts=600; // 10 min max
+  for(var i=0;i<maxAttempts;i++){
+    await new Promise(r=>setTimeout(r,1000));
+    try{
+      var r=await fetch(API_BASE+'/api/download/'+taskId);
+      var d=await r.json();
+      var state=getPikPakState();
+      state[id]=d;
+      savePikPakState(state);
+      updatePikPakBtn(el);
+      if(d.status==='completed'||d.status==='error'||d.status==='cancelled')break;
+    }catch(e){console.log('Poll error',e);break;}
+  }
+}
+
+async function handlePikPakClick(el){
+  var id=el.dataset.comicId;
+  if(!id||!el.dataset.url)return;
+  var state=getPikPakState();
+  var s=state[id];
+  if(s&&s.status==='completed'&&s.share_url){
+    window.open(s.share_url,'_blank');
+    return;
+  }
+  if(s&&(s.status==='queued'||s.status==='downloading')){
+    // Already in progress
+    return;
+  }
+  // Set downloading state
+  state[id]={status:'queued',progress:'请求中...'};
+  savePikPakState(state);
+  updatePikPakBtn(el);
+
+  try{
+    var r=await fetch(API_BASE+'/api/download',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        telegraph_url:el.dataset.url,
+        title_cn:el.dataset.title,
+        title_original:el.dataset.titleOrig,
+        comic_id:el.dataset.comicId,
+        pages:parseInt(el.dataset.pages)||0
+      })
+    });
+    var d=await r.json();
+    if(d.task_id){
+      state[id]={...state[id],status:'queued',progress:'排队中...'};
+      savePikPakState(state);
+      // Start polling
+      pollTask(el,d.task_id);
+    }else{
+      throw new Error('No task_id');
+    }
+  }catch(e){
+    state[id]={status:'error',progress:'连接失败: '+e.message};
+    savePikPakState(state);
+    updatePikPakBtn(el);
+  }
+}
+
+// On page load, refresh all PikPak button states (from localStorage)
+// and poll any in-progress tasks
+(function(){
+  var state=getPikPakState();
+  var hasRunning=false;
+  for(var id in state){
+    var s=state[id];
+    if(s.status==='queued'||s.status==='downloading'){
+      hasRunning=true;
+      break;
+    }
+  }
+  if(hasRunning){
+    // Re-poll all running tasks
+    var btns=document.querySelectorAll('[data-comic-id]');
+    for(var i=0;i<btns.length;i++){
+      var b=btns[i];
+      var sid=b.dataset.comicId;
+      var s=state[sid];
+      if(s&&s.task_id)pollTask(b,s.task_id);
+    }
   }
 })();
 </script>
