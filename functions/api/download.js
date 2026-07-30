@@ -183,27 +183,45 @@ async function pikpakFetch(accessToken, url, options = {}) {
 }
 
 async function getRootFolderId(accessToken) {
-  // Get root folder info - the root is always accessible
-  const data = await pikpakFetch(accessToken, `${PK_API}?parent_id=*&page_size=1&filters=%7B%7D`);
-  // Root parent_id is typically empty string or we can use "root"
-  return '';  // empty string = root in PikPak API
+  // Get user's drive info - root folder ID from first page of files
+  try {
+    const data = await pikpakFetch(accessToken, `${PK_API}?parent_id=*&page_size=1`);
+    if (data.files && data.files.length > 0) {
+      // Files in root have parent_id as the root folder
+      return data.files[0].parent_id || '';
+    }
+  } catch (e) {
+    // Fallback: try to get folder by listing root without filter
+  }
+  
+  // Try listing without parent_id filter
+  try {
+    const data = await pikpakFetch(accessToken, `${PK_API}?page_size=1`);
+    if (data.files && data.files.length > 0) {
+      return data.files[0].parent_id || '';
+    }
+  } catch (e) {}
+  
+  return '';  // Last resort: empty string
 }
 
 async function findOrCreateFolder(accessToken, parentId, name) {
   // Check if folder exists
   const filter = JSON.stringify({
-    phase: { eq: { value: 1 } },  // visible files
+    phase: { eq: { value: 1 } },
     trashed: { eq: { value: false } },
     name: { eq: { value: name } },
   });
   
+  const listParent = parentId || '*';
   try {
     const data = await pikpakFetch(accessToken,
-      `${PK_API}?parent_id=${parentId || 'root'}&page_size=100&filters=${encodeURIComponent(filter)}`
+      `${PK_API}?parent_id=${encodeURIComponent(listParent)}&page_size=100&filters=${encodeURIComponent(filter)}`
     );
     
-    if (data.files && data.files.length > 0 && data.files[0].kind === 'drive#folder') {
-      return data.files[0].id;
+    if (data.files && data.files.length > 0) {
+      const folder = data.files.find(f => f.kind === 'drive#folder');
+      if (folder) return folder.id;
     }
   } catch (e) {
     // Folder doesn't exist, will create
@@ -215,11 +233,11 @@ async function findOrCreateFolder(accessToken, parentId, name) {
     body: JSON.stringify({
       kind: 'drive#folder',
       name: name,
-      parent_id: parentId || 'root',
+      parent_id: parentId || '*',
     }),
   });
 
-  return folderData.file.id || folderData.id;
+  return folderData.file?.id || folderData.id;
 }
 
 async function createOfflineTask(accessToken, fileName, fileUrl, parentId) {
