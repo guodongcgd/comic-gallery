@@ -183,61 +183,51 @@ async function pikpakFetch(accessToken, url, options = {}) {
 }
 
 async function getRootFolderId(accessToken) {
-  // Get user's drive info - root folder ID from first page of files
+  // In PikPak API, root is identified by empty string or * 
+  // Try to get any file at root level to extract parent_id
   try {
-    const data = await pikpakFetch(accessToken, `${PK_API}?parent_id=*&page_size=1`);
-    if (data.files && data.files.length > 0) {
-      // Files in root have parent_id as the root folder
-      return data.files[0].parent_id || '';
-    }
-  } catch (e) {
-    // Fallback: try to get folder by listing root without filter
-  }
-  
-  // Try listing without parent_id filter
-  try {
-    const data = await pikpakFetch(accessToken, `${PK_API}?page_size=1`);
+    const data = await pikpakFetch(accessToken, `${PK_API}?page_size=5`);
     if (data.files && data.files.length > 0) {
       return data.files[0].parent_id || '';
     }
   } catch (e) {}
-  
-  return '';  // Last resort: empty string
+  return '';
 }
 
 async function findOrCreateFolder(accessToken, parentId, name) {
-  // Check if folder exists
-  const filter = JSON.stringify({
-    phase: { eq: { value: 1 } },
-    trashed: { eq: { value: false } },
-    name: { eq: { value: name } },
-  });
-  
-  const listParent = parentId || '*';
-  try {
-    const data = await pikpakFetch(accessToken,
-      `${PK_API}?parent_id=${encodeURIComponent(listParent)}&page_size=100&filters=${encodeURIComponent(filter)}`
-    );
+  // PikPak API root: use empty string for parent_id
+  const createParent = parentId || '';
     
-    if (data.files && data.files.length > 0) {
-      const folder = data.files.find(f => f.kind === 'drive#folder');
-      if (folder) return folder.id;
-    }
+  // Try creating folder directly
+  try {
+    const folderData = await pikpakFetch(accessToken, PK_API, {
+      method: 'POST',
+      body: JSON.stringify({
+        kind: 'drive#folder',
+        name: name,
+        parent_id: createParent,
+      }),
+    });
+    return folderData.file?.id || folderData.id;
   } catch (e) {
-    // Folder doesn't exist, will create
+    // If folder already exists, we need to find its ID by listing
+    if (e.message?.includes('already exists') || e.message?.includes('500')) {
+      const filter = JSON.stringify({
+        phase: { eq: { value: 1 } },
+        trashed: { eq: { value: false } },
+        name: { eq: { value: name } },
+      });
+      const listParent = createParent || '*';
+      const data = await pikpakFetch(accessToken,
+        `${PK_API}?parent_id=${encodeURIComponent(listParent)}&page_size=100&filters=${encodeURIComponent(filter)}`
+      );
+      if (data.files && data.files.length > 0) {
+        const folder = data.files.find(f => f.kind === 'drive#folder');
+        if (folder) return folder.id;
+      }
+    }
+    throw e;
   }
-
-  // Create folder
-  const folderData = await pikpakFetch(accessToken, PK_API, {
-    method: 'POST',
-    body: JSON.stringify({
-      kind: 'drive#folder',
-      name: name,
-      parent_id: parentId || '*',
-    }),
-  });
-
-  return folderData.file?.id || folderData.id;
 }
 
 async function createOfflineTask(accessToken, fileName, fileUrl, parentId) {
