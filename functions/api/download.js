@@ -59,13 +59,8 @@ async function handleDownload(request, env, corsHeaders) {
       });
     }
 
-    // Step 3: Find or create parent folder (漫画/)
-    const rootId = await getRootFolderId(accessToken);
-    const comicFolderId = await findOrCreateFolder(accessToken, rootId, COMIC_ROOT);
-
-    // Step 4: Create comic-specific folder
-    const folderName = sanitizeName(title_cn);
-    const folderId = await findOrCreateFolder(accessToken, comicFolderId, folderName);
+    // Step 3: Create comic folder directly at root
+    const folderId = await createFolder(accessToken, '', sanitizeName(title_cn));
 
     // Step 5: Submit offline download tasks for all images
     const fileIds = [];
@@ -83,7 +78,7 @@ async function handleDownload(request, env, corsHeaders) {
       status: 'completed',
       share_url: shareUrl,
       total: imageUrls.length,
-      folder: `/${COMIC_ROOT}/${folderName}`,
+      folder: `/${sanitizeName(title_cn)}`,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -194,7 +189,7 @@ async function getRootFolderId(accessToken) {
   return '';
 }
 
-async function findOrCreateFolder(accessToken, parentId, name) {
+async function createFolder(accessToken, parentId, name) {
   // PikPak API root: use empty string for parent_id
   const createParent = parentId || '';
     
@@ -210,21 +205,20 @@ async function findOrCreateFolder(accessToken, parentId, name) {
     });
     return folderData.file?.id || folderData.id;
   } catch (e) {
-    // If folder already exists, we need to find its ID by listing
-    if (e.message?.includes('already exists') || e.message?.includes('file_duplicated_name') || e.message?.includes('500')) {
-      const filter = JSON.stringify({
-        phase: { eq: { value: 1 } },
-        trashed: { eq: { value: false } },
-        name: { eq: { value: name } },
+    // If folder might already exist, try with different approach
+    if (e.message?.includes('file_duplicated_name')) {
+      // Create with a unique suffix
+      const suffix = Date.now().toString(36).slice(-4);
+      const altName = `${name}_${suffix}`;
+      const folderData2 = await pikpakFetch(accessToken, PK_API, {
+        method: 'POST',
+        body: JSON.stringify({
+          kind: 'drive#folder',
+          name: altName,
+          parent_id: createParent,
+        }),
       });
-      const listParent = createParent || '*';
-      const data = await pikpakFetch(accessToken,
-        `${PK_API}?parent_id=${encodeURIComponent(listParent)}&page_size=100&filters=${encodeURIComponent(filter)}`
-      );
-      if (data.files && data.files.length > 0) {
-        const folder = data.files.find(f => f.kind === 'drive#folder');
-        if (folder) return folder.id;
-      }
+      return folderData2.file?.id || folderData2.id;
     }
     throw e;
   }
