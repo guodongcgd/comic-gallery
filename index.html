@@ -388,23 +388,30 @@ function applyData(d){
   updateButtons();applyFilter();
 }
 
-// ── Init ──
+// ── Load data: always try GitHub API first (live data), fallback to CDN ──
+async function loadViaContentsAPI(){
+  // Public repo Contents API works without auth for read
+  var r=await fetch('https://api.github.com/repos/'+repoOwner+'/'+repoName+'/contents/'+jsonPath,{
+    headers:{'Accept':'application/vnd.github.v3.raw'}
+  });
+  if(!r.ok)throw new Error('GitHub API HTTP '+r.status);
+  return r.json();
+}
+
 (async function(){
-  var savedToken=localStorage.getItem('gh_token');
-  var loaded=false;
-  if(savedToken){
-    try{document.getElementById('loading').textContent='正在加载最新数据...';
-      var d=await loadFromGitHub(savedToken);applyData(d);loaded=true;
-    }catch(e){console.log('GitHub API error, fallback to CDN',e);}
-  }
-  if(!loaded){
-    fetch('comics.json?'+Date.now()).then(function(r){return r.json()}).then(function(d){
-      applyData(d);
-    }).catch(function(e){
-      document.getElementById('loading').style.display='none';
-      document.getElementById('error').style.display='block';
-      document.getElementById('error').textContent='加载失败: '+e;
-    });
+  document.getElementById('loading').textContent='正在加载最新数据...';
+  try{
+    var d=await loadViaContentsAPI();applyData(d);
+    return;
+  }catch(e){console.log('GitHub API error, fallback to CDN',e);}
+  // Fallback: fetch from CDN (deployed version, may be stale)
+  try{
+    var r=await fetch('comics.json?'+Date.now());
+    var d=await r.json();applyData(d);
+  }catch(e){
+    document.getElementById('loading').style.display='none';
+    document.getElementById('error').style.display='block';
+    document.getElementById('error').textContent='加载失败: '+e;
   }
 })();
 </script>
