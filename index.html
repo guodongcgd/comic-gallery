@@ -305,11 +305,24 @@ async function confirmDelete(){
       await fetch('/api/deleted',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({comic_id:parseInt(id),title:title})});
       deletedIds.add(parseInt(id));
     }
-    document.getElementById('del-status').textContent='✅ 已隐藏 '+idsToDelete.length+' 本（刷新后生效）';
+    document.getElementById('del-status').textContent='✅ 已隐藏 '+idsToDelete.length+' 本';
     btn.textContent='✅ 完成';
     selected.clear();
     // Update UI immediately
     closeModal();
+    // Recalculate tag/author counts excluding deleted
+    var tagCount={}, authorCount={};
+    for(var i=0;i<allComics.length;i++){
+      if(deletedIds.has(allComics[i].id)) continue;
+      var c=allComics[i];
+      if(c.author&&c.author!=='') authorCount[c.author]=(authorCount[c.author]||0)+1;
+      for(var j=0;j<c.tags.length;j++) tagCount[c.tags[j]]=(tagCount[c.tags[j]]||0)+1;
+    }
+    allTags=[];for(var n in tagCount) allTags.push({name:n,count:tagCount[n]});
+    allTags.sort(function(a,b){return b.count-a.count});
+    allAuthors=[];for(var n in authorCount) allAuthors.push({name:n,count:authorCount[n]});
+    allAuthors.sort(function(a,b){return b.count-a.count});
+    updateButtons();
     applyFilter();
   }catch(e){
     document.getElementById('del-status').textContent='❌ 错误: '+e.message;
