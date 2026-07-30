@@ -116,6 +116,17 @@ export async function onRequest(context) {
 
       let added = 0;
       for (const c of comics) {
+        // Skip if this comic was already imported (check by telegram_url)
+        const telegramUrl = c.telegram_url || '';
+        const telegraphUrl = c.telegraph_url || '';
+        if (telegramUrl || telegraphUrl) {
+          const { results } = await db.prepare(
+            'SELECT COUNT(*) as cnt FROM comics WHERE telegram_url = ? OR telegraph_url = ?'
+          ).bind(telegramUrl, telegraphUrl).all();
+          if (results[0].cnt > 0) {
+            continue; // Already exists (even if deleted), skip
+          }
+        }
         const tagsJson = JSON.stringify(c.tags || []);
         await db.prepare(
           `INSERT OR IGNORE INTO comics 
