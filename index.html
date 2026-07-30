@@ -410,14 +410,14 @@ async function loadViaContentsAPI(){
   document.getElementById('loading').textContent='正在加载最新数据...';
   try{
     var d=await loadViaContentsAPI();applyData(d);
-    await loadPikPakRecords();
+    await loadPikPakRecords();refreshPikPakButtons();
     return;
   }catch(e){console.log('GitHub API error, fallback to CDN',e);}
   // Fallback: fetch from CDN (deployed version, may be stale)
   try{
     var r=await fetch('comics.json?'+Date.now());
     var d=await r.json();applyData(d);
-    await loadPikPakRecords();
+    await loadPikPakRecords();refreshPikPakButtons();
   }catch(e){
     document.getElementById('loading').style.display='none';
     document.getElementById('error').style.display='block';
@@ -457,6 +457,13 @@ async function savePikPakRecord(id, data){
       body:JSON.stringify({comic_id:id,share_url:data.share_url,title:data.title||'',pages:data.downloaded||0})
     });
   }catch(e){console.log('D1 save error',e);}
+}
+
+// Refresh all PikPak buttons on the page (call after D1 records load)
+function refreshPikPakButtons(){
+  document.querySelectorAll('.lb[data-comic-id]').forEach(function(el){
+    updatePikPakBtn(el);
+  });
 }
 
 function updatePikPakBtn(el){
