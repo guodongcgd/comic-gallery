@@ -1,0 +1,7 @@
+name = "comic-gallery"
+pages_build_output_dir = "."
+
+[[d1_databases]]
+binding = "DB"
+database_name = "comic-gallery-db"
+database_id = "b8e816d1-dd60-42f5-802c-991149977738"

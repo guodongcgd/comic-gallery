@@ -161,7 +161,6 @@ function renderCard(c){
   pb.dataset.titleOrig=c.title_original||'';
   pb.dataset.pages=c.pages||0;
   updatePikPakBtn(pb);
-  pb.onclick=function(){handlePikPakClick(this)};
   lk.appendChild(pb);
   di.appendChild(lk);
   cd.appendChild(di);
@@ -411,12 +410,14 @@ async function loadViaContentsAPI(){
   document.getElementById('loading').textContent='正在加载最新数据...';
   try{
     var d=await loadViaContentsAPI();applyData(d);
+    await loadPikPakRecords();
     return;
   }catch(e){console.log('GitHub API error, fallback to CDN',e);}
   // Fallback: fetch from CDN (deployed version, may be stale)
   try{
     var r=await fetch('comics.json?'+Date.now());
     var d=await r.json();applyData(d);
+    await loadPikPakRecords();
   }catch(e){
     document.getElementById('loading').style.display='none';
     document.getElementById('error').style.display='block';
@@ -428,21 +429,41 @@ async function loadViaContentsAPI(){
 // API_BASE = Tunnel URL for local PikPak download server
 // Change to '' to use Cloudflare Pages Function instead
 var API_BASE = 'https://not-establishment-ebooks-ourselves.trycloudflare.com';
-var PP_STATE_KEY = 'pikpak_downloads';
 
-function getPikPakState(){
-  try{return JSON.parse(localStorage.getItem(PP_STATE_KEY)||'{}')}catch(e){return {}}
+// Global in-memory state (mirrors D1 records)
+var gPikPakState = {};
+
+// Load all download records from D1
+async function loadPikPakRecords(){
+  try{
+    var r=await fetch('/api/records');
+    var d=await r.json();
+    if(d.records){
+      gPikPakState={};
+      d.records.forEach(function(rec){
+        gPikPakState[rec.comic_id]={status:'completed',share_url:rec.share_url,progress:'完成',title:rec.title,downloaded:rec.pages};
+      });
+    }
+  }catch(e){console.log('D1 load error',e);gPikPakState={};}
 }
-function savePikPakState(s){
-  localStorage.setItem(PP_STATE_KEY,JSON.stringify(s));
+
+// Save a completed record to D1 (fire-and-forget)
+async function savePikPakRecord(id, data){
+  if(!data||data.status!=='completed'||!data.share_url)return;
+  try{
+    await fetch('/api/records',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({comic_id:id,share_url:data.share_url,title:data.title||'',pages:data.downloaded||0})
+    });
+  }catch(e){console.log('D1 save error',e);}
 }
 
 function updatePikPakBtn(el){
   var id=el.dataset.comicId;
   if(!id||!el.dataset.url){el.style.display='none';return}
   el.style.display='inline-block';
-  var state=getPikPakState();
-  var s=state[id];
+  var s=gPikPakState[id];
   if(s&&s.status==='completed'){
     el.style.background='#fbbf2415';el.style.color='#fbbf24';el.style.border='1px solid #fbbf2440';
     el.textContent='📖 阅读';el.onclick=function(){window.open(s.share_url,'_blank')};
@@ -461,16 +482,14 @@ function updatePikPakBtn(el){
 async function handlePikPakClick(el){
   var id=el.dataset.comicId;
   if(!id||!el.dataset.url)return;
-  var state=getPikPakState();
-  var s=state[id];
+  var s=gPikPakState[id];
   if(s&&s.status==='completed'&&s.share_url){
     window.open(s.share_url,'_blank');return;
   }
   if(s&&(s.status==='queued'||s.status==='loading'))return;
 
   // Show loading state
-  state[id]={status:'loading',progress:'连接服务器...'};
-  savePikPakState(state);
+  gPikPakState[id]={status:'loading',progress:'连接服务器...'};
   updatePikPakBtn(el);
 
   try{
@@ -481,67 +500,48 @@ async function handlePikPakClick(el){
         telegraph_url:el.dataset.url,
         title_cn:el.dataset.title,
         title_original:el.dataset.titleOrig,
-        comic_id:el.dataset.comicId,
+        comic_id:id,
         pages:parseInt(el.dataset.pages)||0
       })
     });
     var d=await r.json();
     if(!d.task_id) throw new Error(d.error||'服务器返回异常');
 
-    state[id]={status:'loading',progress:'排队中...',taskId:d.task_id};
-    savePikPakState(state);
+    gPikPakState[id]={status:'loading',progress:'排队中...',taskId:d.task_id};
     updatePikPakBtn(el);
 
     // Poll for status
-    var maxWait=600; // max 10 min
+    var maxWait=600;
     var waited=0;
     var pollTimer=setInterval(async function(){
       try{
         var pr=await fetch(API_BASE+'/api/download/'+d.task_id);
         var pd=await pr.json();
         waited+=3;
-        state=getPikPakState();
         if(pd.status==='completed'){
           clearInterval(pollTimer);
-          state[id]={status:'completed',share_url:pd.share_url||'',progress:'完成'};
-          savePikPakState(state);
+          gPikPakState[id]={status:'completed',share_url:pd.share_url||'',progress:'完成',title:el.dataset.title,downloaded:pd.downloaded};
+          savePikPakRecord(id,gPikPakState[id]);
           updatePikPakBtn(el);
         }else if(pd.status==='error'){
           clearInterval(pollTimer);
-          state[id]={status:'error',progress:pd.progress||'下载失败'};
-          savePikPakState(state);
+          gPikPakState[id]={status:'error',progress:pd.progress||'下载失败'};
           updatePikPakBtn(el);
         }else if(waited>maxWait){
           clearInterval(pollTimer);
-          state[id]={status:'error',progress:'超时'};
-          savePikPakState(state);
+          gPikPakState[id]={status:'error',progress:'超时'};
           updatePikPakBtn(el);
         }else{
-          state[id]={status:'loading',progress:pd.progress||'下载中...',taskId:d.task_id};
-          savePikPakState(state);
-          // Don't update button text every poll (keeps "下载中...")
+          gPikPakState[id]={status:'loading',progress:pd.progress||'下载中...',taskId:d.task_id};
         }
       }catch(e){/* poll error, retry */}
     },3000);
 
   }catch(e){
-    state[id]={status:'error',progress:e.message};
-    savePikPakState(state);
+    gPikPakState[id]={status:'error',progress:e.message};
     updatePikPakBtn(el);
   }
 }
-
-// Refresh button states on page load
-(function(){
-  var state=getPikPakState();
-  // Clear any stuck "loading" states (from before page refresh)
-  for(var id in state){
-    if(state[id].status==='loading'||state[id].status==='queued'){
-      delete state[id];
-    }
-  }
-  savePikPakState(state);
-})();
 </script>
 </body>
 </html>
