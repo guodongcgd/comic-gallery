@@ -1,8 +1,8 @@
 // Cloudflare Pages Function - PikPak Download API
 // Processes comic download requests via PikPak's offline download feature
 
-const PK_CLIENT_ID = 'YUMx5nIh5O1dDp8q';
-const PK_CLIENT_SECRET = 'dbC6iz0WgXoja2BcPZPkVTXo0SgY_hYq';
+const PK_CLIENT_ID = 'YNxT9w7GMdWvEOKa';
+const PK_CLIENT_SECRET = 'dbw2OtmVEeuUvIptb1Coyg';
 const PK_AUTH_URL = 'https://user.mypikpak.com/v1/auth/signin';
 const PK_API = 'https://api-drive.mypikpak.com/drive/v1/files';
 const PK_TASK = 'https://api-drive.mypikpak.com/drive/v1/task';
