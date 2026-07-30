@@ -4,9 +4,9 @@
 const PK_CLIENT_ID = 'YUMx5nIh5O1dDp8q';
 const PK_CLIENT_SECRET = 'dbC6iz0WgXoja2BcPZPkVTXo0SgY_hYq';
 const PK_AUTH_URL = 'https://user.mypikpak.com/v1/auth/signin';
-const PK_API = 'https://api.mypikpak.com/drive/v1/files';
-const PK_TASK = 'https://api.mypikpak.com/drive/v1/task';
-const PK_SHARE = 'https://api.mypikpak.com/drive/v1/share/shares';
+const PK_API = 'https://api-drive.mypikpak.com/drive/v1/files';
+const PK_TASK = 'https://api-drive.mypikpak.com/drive/v1/task';
+const PK_SHARE = 'https://api-drive.mypikpak.com/drive/v1/share/shares';
 const COMIC_ROOT = '漫画';  // PikPak folder name under root
 
 export async function onRequest(context) {
