@@ -72,6 +72,7 @@ h1{color:#fbbf24;font-size:1.3rem;margin:0;cursor:pointer}
 <h1 onclick="location.reload()">🏳️🌈 Comic Gallery</h1>
 <button class="tgbtn" id="tgb" onclick="tg()">显示中文</button>
 <button class="tgbtn" onclick="fa()">🔄 重置</button>
+<button class="tgbtn" onclick="showSettings()">⚙️</button>
 <input id="sb" class="sb" placeholder="🔍 搜索标题/标签/作者..." oninput="ss()">
 </div>
 <p class="sub"><span class="cnt" id="status">加载中...</span></p>
@@ -424,8 +425,42 @@ async function loadViaContentsAPI(){
   }
 })();
 
+// ── Settings ──
+var API_BASE = localStorage.getItem('pikpak_api_url') || '';
+function showSettings(){
+  var overlay=document.createElement('div');overlay.className='modal-overlay';overlay.style.display='flex';
+  overlay.onclick=function(e){if(e.target===this)document.body.removeChild(this)};
+  var modal=document.createElement('div');modal.className='modal';
+  modal.innerHTML='<h3>⚙️ 设置</h3>'+
+    '<p>PikPak 下载服务器地址（本地运行需要填）</p>'+
+    '<p style="font-size:.75rem;color:#ef4444">⚠️ 填写后页面会自动连接，不填则按钮禁用</p>'+
+    '<input type="text" id="settings-api-url" value="'+esc(API_BASE)+'" placeholder="https://xxx.trycloudflare.com" style="width:100%;padding:8px 12px;border-radius:6px;border:1px solid #2a2420;background:#0f0c0a;color:#e7e0d9;font-size:.85rem;outline:none">'+
+    '<div class="btn-row">'+
+    '<button style="background:#2a2420;color:#a8a29e" onclick="document.body.removeChild(this.parentElement.parentElement.parentElement)">取消</button>'+
+    '<button style="background:#22c55e;color:#fff" onclick="saveSettings()">保存</button>'+
+    '</div>';
+  overlay.appendChild(modal);document.body.appendChild(overlay);
+  document.getElementById('settings-api-url').focus();
+}
+function saveSettings(){
+  var url=document.getElementById('settings-api-url').value.trim().replace(/\/+$/,'');
+  if(url){localStorage.setItem('pikpak_api_url',url);API_BASE=url;}
+  else{localStorage.removeItem('pikpak_api_url');API_BASE='';}
+  document.body.removeChild(document.querySelector('.modal-overlay'));
+  // Refresh button states
+  document.querySelectorAll('[data-comic-id]').forEach(function(el){updatePikPakBtn(el);});
+  // Re-poll running tasks
+  var state=getPikPakState();
+  for(var id in state){
+    var s=state[id];
+    if(s&&s.task_id&&(s.status==='queued'||s.status==='downloading')){
+      var el=document.querySelector('[data-comic-id="'+id+'"]');
+      if(el)pollTask(el,s.task_id);
+    }
+  }
+}
+
 // ── PikPak Download ──
-var API_BASE = localStorage.getItem('pikpak_api_url') || 'http://127.0.0.1:8899';
 var PP_STATE_KEY = 'pikpak_downloads';
 
 function getPikPakState(){
@@ -437,7 +472,7 @@ function savePikPakState(s){
 
 function updatePikPakBtn(el){
   var id=el.dataset.comicId;
-  if(!id||!el.dataset.url){el.style.display='none';return}
+  if(!id||!el.dataset.url||!API_BASE){el.style.display='none';return}
   el.style.display='inline-block';
   var state=getPikPakState();
   var s=state[id];
@@ -474,6 +509,7 @@ async function pollTask(el,taskId){
 }
 
 async function handlePikPakClick(el){
+  if(!API_BASE){showSettings();return;}
   var id=el.dataset.comicId;
   if(!id||!el.dataset.url)return;
   var state=getPikPakState();
