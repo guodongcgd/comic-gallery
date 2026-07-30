@@ -92,21 +92,16 @@ h1{color:#fbbf24;font-size:1.3rem;margin:0;cursor:pointer}
   <button class="del-go" onclick="showDeleteModal()">🗑 删除选中</button>
 </div>
 
-<!-- Delete Modal -->
+<!-- Delete Confirmation -->
 <div class="modal-overlay" id="modal-overlay" onclick="if(event.target===this)closeModal()">
 <div class="modal">
 <h3>🗑 确认删除</h3>
-<p>将从数据中永久删除以下 <span id="del-count">0</span> 本漫画：</p>
+<p>将从显示中永久隐藏以下 <span id="del-count">0</span> 本漫画（数据存在 D1，可恢复）：</p>
 <ul class="del-list" id="del-list"></ul>
-<p style="font-size:.75rem">⚠️ 操作不可撤销！删除后需输入 GitHub Token 提交更改。</p>
-<input type="password" id="token-input" placeholder="输入 GitHub Token (ghp_...)" autocomplete="off">
-<label style="color:#a8a29e;font-size:.75rem;display:flex;align-items:center;gap:6px;margin:4px 0">
-  <input type="checkbox" id="save-token" checked> 记住 Token（存 localStorage）
-</label>
 <p id="del-status" style="color:#fbbf24;font-size:.8rem"></p>
 <div class="btn-row">
 <button style="background:#2a2420;color:#a8a29e" onclick="closeModal()">取消</button>
-<button id="del-confirm-btn" style="background:#ef4444;color:#fff" onclick="confirmDelete()">确认删除并提交</button>
+<button id="del-confirm-btn" style="background:#ef4444;color:#fff" onclick="confirmDelete()">确认删除</button>
 </div>
 </div>
 </div>
@@ -178,6 +173,8 @@ function renderPage(p){
 function applyFilter(){
   var q=searchQ.toLowerCase();
   filtered=allComics.filter(function(c){
+    // Skip deleted comics
+    if(deletedIds.has(c.id)) return false;
     var ma=true;
     if(selAuthors.length){var found=false;for(var i=0;i<selAuthors.length;i++){if(c.author===selAuthors[i]){found=true;break;}}if(!found)ma=false;}
     if(ma&&selTags.length){var found=false;for(var i=0;i<selTags.length;i++){if(c.tags.indexOf(selTags[i])>=0){found=true;break;}}if(!found)ma=false;}
@@ -239,7 +236,18 @@ function ss(){searchQ=document.getElementById('sb').value.trim();applyFilter();}
 function tg(){sc=!sc;document.getElementById('tgb').textContent=sc?'显示中文':'显示原标题';document.getElementById('tgb').classList.toggle('on',!sc);applyTitleToggle();}
 function applyTitleToggle(){document.querySelectorAll('.tt.cn').forEach(function(e){e.style.display=sc?'none':''});document.querySelectorAll('.tt.rw').forEach(function(e){e.style.display=sc?'':'none'});}
 
-// ── Selection & Delete ──
+// ── Selection & Delete (D1-backed, no GitHub token needed) ──
+var deletedIds = new Set();
+
+async function loadDeletedComics(){
+  try{
+    var r=await fetch('/api/deleted');
+    var d=await r.json();
+    deletedIds = new Set();
+    if(d.deleted) d.deleted.forEach(function(rec){deletedIds.add(rec.comic_id);});
+  }catch(e){console.log('load deleted error',e);}
+}
+
 function toggleSelect(id){
   id=String(id);
   if(selected.has(id))selected.delete(id);else selected.add(id);
@@ -266,7 +274,6 @@ function updateDelBar(){
 
 function showDeleteModal(){
   if(selected.size===0)return;
-  var ids=Array.from(selected);
   var list=document.getElementById('del-list');list.innerHTML='';
   var count=0;
   for(var i=0;i<allComics.length;i++){
@@ -280,115 +287,34 @@ function showDeleteModal(){
   }
   document.getElementById('del-count').textContent=selected.size;
   document.getElementById('del-status').textContent='';
-  // Pre-fill token from localStorage if saved
-  var savedToken=localStorage.getItem('gh_token')||'';
-  document.getElementById('token-input').value=savedToken;
-  document.getElementById('save-token').checked=!!savedToken;
   document.getElementById('modal-overlay').style.display='flex';
 }
 
 function closeModal(){document.getElementById('modal-overlay').style.display='none';}
 
 async function confirmDelete(){
-  var token=document.getElementById('token-input').value.trim();
-  if(!token){document.getElementById('del-status').textContent='请输入 GitHub Token';return;}
-  
-  // Save token if checkbox checked
-  if(document.getElementById('save-token').checked){
-    localStorage.setItem('gh_token', token);
-  }
-  
   var btn=document.getElementById('del-confirm-btn');
-  btn.disabled=true;btn.textContent='提交中...';
-  
+  btn.disabled=true;btn.textContent='删除中...';
+  var idsToDelete=Array.from(selected);
   try{
-    var idsToDelete=new Set(selected);
-    
-    // Use in-memory data (deep copy)
-    document.getElementById('del-status').textContent='处理数据...';
-    var data=JSON.parse(JSON.stringify(ALL_DATA));
-    
-    // Filter
-    var before=data.comics.length;
-    data.comics=data.comics.filter(function(c){return !idsToDelete.has(String(c.id));});
-    var after=data.comics.length;
-    var deletedCount=before-after;
-    if(deletedCount===0){document.getElementById('del-status').textContent='没有匹配到要删除的漫画';btn.disabled=false;btn.textContent='确认删除并提交';return;}
-    
-    // Recalculate counts
-    var tagCount={}, authorCount={};
-    for(var i=0;i<data.comics.length;i++){
-      var c=data.comics[i];
-      if(c.author&&c.author!=='')authorCount[c.author]=(authorCount[c.author]||0)+1;
-      for(var j=0;j<c.tags.length;j++)tagCount[c.tags[j]]=(tagCount[c.tags[j]]||0)+1;
+    for(var i=0;i<idsToDelete.length;i++){
+      var id=idsToDelete[i];
+      // Find title
+      var title='';
+      for(var j=0;j<allComics.length;j++){if(String(allComics[j].id)===id){title=allComics[j].title_cn||allComics[j].title_original||'';break;}}
+      await fetch('/api/deleted',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({comic_id:parseInt(id),title:title})});
+      deletedIds.add(parseInt(id));
     }
-    data.tags=[];for(var n in tagCount)data.tags.push({name:n,count:tagCount[n]});
-    data.tags.sort(function(a,b){return b.count-a.count});
-    data.authors=[];for(var n in authorCount)data.authors.push({name:n,count:authorCount[n]});
-    data.authors.sort(function(a,b){return b.count-a.count});
-    
-    // Create blob with new content
-    document.getElementById('del-status').textContent='提交到 GitHub ('+deletedCount+' 本)...';
-    var newJson=JSON.stringify(data);
-    var encoded=btoa(unescape(encodeURIComponent(newJson)));
-    var blob=await ghCall('POST','git/blobs',{content:encoded,encoding:'base64'},token);
-    
-    // Get current ref + commit tree
-    var ref=await ghCall('GET','git/refs/heads/main',null,token);
-    var commit=await ghCall('GET','git/commits/'+ref.object.sha,null,token);
-    
-    // Create new tree with updated file
-    var newTree=await ghCall('POST','git/trees',{
-      base_tree:commit.tree.sha,
-      tree:[{path:jsonPath,mode:'100644',type:'blob',sha:blob.sha}]
-    },token);
-    
-    // Create commit
-    var newCommit=await ghCall('POST','git/commits',{
-      message:'Delete '+deletedCount+' comic(s) via gallery UI',
-      tree:newTree.sha,
-      parents:[ref.object.sha]
-    },token);
-    
-    // Update ref
-    await ghCall('PATCH','git/refs/heads/main',{sha:newCommit.sha,force:false},token);
-    
-    // Update in-memory data immediately so UI reflects changes
-    ALL_DATA=data;
-    allComics=data.comics;
-    allTags=data.tags;
-    allAuthors=data.authors;
-    
-    document.getElementById('del-status').textContent='✅ 成功删除 '+deletedCount+' 本！';
+    document.getElementById('del-status').textContent='✅ 已隐藏 '+idsToDelete.length+' 本（刷新后生效）';
     btn.textContent='✅ 完成';
     selected.clear();
+    // Update UI immediately
     closeModal();
-    updateButtons();
     applyFilter();
-    
   }catch(e){
     document.getElementById('del-status').textContent='❌ 错误: '+e.message;
-    btn.disabled=false;btn.textContent='确认删除并提交';
+    btn.disabled=false;btn.textContent='确认删除';
   }
-}
-
-// ── GitHub API helper ──
-async function ghCall(method,apiPath,body,token){
-  var opts={method:method,headers:{'Authorization':'token '+token,'Accept':'application/vnd.github.v3+json'}};
-  if(body)opts.body=JSON.stringify(body);
-  var r=await fetch('https://api.github.com/repos/'+repoOwner+'/'+repoName+'/'+apiPath,opts);
-  if(!r.ok){var t=await r.text();throw new Error('HTTP '+r.status+': '+(t.slice(0,200)||'empty'));}
-  return r.json();
-}
-
-async function loadFromGitHub(token){
-  var ref=await ghCall('GET','git/refs/heads/main',null,token);
-  var commit=await ghCall('GET','git/commits/'+ref.object.sha,null,token);
-  var tree=await ghCall('GET','git/trees/'+commit.tree.sha,null,token);
-  var fi=null;for(var i=0;i<tree.tree.length;i++){if(tree.tree[i].path==jsonPath){fi=tree.tree[i];break;}}
-  if(!fi)throw new Error('File not found');
-  var blob=await ghCall('GET','git/blobs/'+fi.sha,null,token);
-  return JSON.parse(decodeURIComponent(escape(atob(blob.content))));
 }
 
 function applyData(d){
@@ -414,6 +340,7 @@ async function loadViaContentsAPI(){
   try{
     var d=await loadViaContentsAPI();applyData(d);
     await loadPikPakRecords();refreshPikPakButtons();
+    await loadDeletedComics();applyFilter();
     return;
   }catch(e){console.log('GitHub API error, fallback to CDN',e);}
   // Fallback: fetch from CDN (deployed version, may be stale)
@@ -421,6 +348,7 @@ async function loadViaContentsAPI(){
     var r=await fetch('comics.json?'+Date.now());
     var d=await r.json();applyData(d);
     await loadPikPakRecords();refreshPikPakButtons();
+    await loadDeletedComics();applyFilter();
   }catch(e){
     document.getElementById('loading').style.display='none';
     document.getElementById('error').style.display='block';
