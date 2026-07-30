@@ -291,11 +291,12 @@ async function confirmDelete(){
     // 1. Get current file from GitHub
     var url=getGithubApiUrl(jsonPath);
     var resp=await fetch(url+'?t='+Date.now(),{headers:{'Authorization':'token '+token,'Accept':'application/vnd.github.v3+json'}});
-    if(!resp.ok){var err=await resp.json();throw new Error(err.message||'获取失败');}
+    if(!resp.ok){var errText=await resp.text();throw new Error('HTTP '+resp.status+': '+(errText||'empty'));}
     var fileData=await resp.json();
+    if(!fileData.content)throw new Error('响应中没有文件内容');
     
     // 2. Parse current data
-    var currentJson=atob(fileData.content);
+    var currentJson=decodeURIComponent(escape(atob(fileData.content)));
     var data=JSON.parse(currentJson);
     
     // 3. Filter out deleted comics
@@ -321,7 +322,7 @@ async function confirmDelete(){
     data.authors.sort(function(a,b){return b.count-a.count});
     
     // 5. Encode and push
-    var newJson=JSON.stringify(data, null, 2); // pretty print
+    var newJson=JSON.stringify(data);
     var encoded=btoa(unescape(encodeURIComponent(newJson)));
     
     document.getElementById('del-status').textContent='正在提交更改 ('+deletedCount+' 本)...';
@@ -336,7 +337,7 @@ async function confirmDelete(){
       })
     });
     
-    if(!putResp.ok){var putErr=await putResp.json();throw new Error(putErr.message||'提交失败');}
+    if(!putResp.ok){var putErrText=await putResp.text();throw new Error('提交失败 HTTP '+putResp.status+': '+(putErrText||'empty'));}
     
     document.getElementById('del-status').textContent='✅ 成功删除 '+deletedCount+' 本！页面即将刷新...';
     btn.textContent='✅ 完成';
