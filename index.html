@@ -280,7 +280,10 @@ function showDeleteModal(){
   }
   document.getElementById('del-count').textContent=selected.size;
   document.getElementById('del-status').textContent='';
-  document.getElementById('token-input').value='';
+  // Pre-fill token from localStorage if saved
+  var savedToken=localStorage.getItem('gh_token')||'';
+  document.getElementById('token-input').value=savedToken;
+  document.getElementById('save-token').checked=!!savedToken;
   document.getElementById('modal-overlay').style.display='flex';
 }
 
