@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Comic Gallery</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#0f0c0a;color:#e7e0d9;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:16px;max-width:1440px;margin:auto}
+h1{color:#fbbf24;font-size:1.3rem;margin:0;cursor:pointer}
+.hd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.sub{color:#a8a29e;font-size:0.8rem;margin:0}
+.tgbtn{background:#2a2420;color:#e7e0d9;border:1px solid #5a4a40;padding:3px 12px;border-radius:5px;cursor:pointer;font-size:0.75rem;white-space:nowrap}
+.tgbtn:hover{background:#3a322e;border-color:#fbbf24}.tgbtn.on{background:#fbbf24;color:#0f0c0a;border-color:#fbbf24;font-weight:600}
+.sl{color:#a8a29e;font-size:0.7rem;font-weight:600;margin:3px 0}
+.fb{display:flex;flex-wrap:wrap;gap:3px;padding-bottom:6px;border-bottom:1px solid #2a2420;margin-bottom:3px;max-height:130px;overflow-y:auto}
+.fb:last-of-type{margin-bottom:10px}
+.tb{background:#1a1614;color:#a8a29e;border:1px solid #2a2420;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:0.68rem;white-space:nowrap;margin:1px}
+.tb:hover{background:#2a2420;color:#fbbf24}.tb.on{background:#fbbf24;color:#0f0c0a;border-color:#fbbf24;font-weight:600}
+.cnt{color:#57534e;font-size:0.75rem;margin-bottom:8px}
+.pag{display:flex;justify-content:center;gap:4px;margin-bottom:12px;padding:6px 0;border-top:1px solid #2a2420;border-bottom:1px solid #2a2420;flex-wrap:wrap}
+.pb{background:#1a1614;color:#a8a29e;border:1px solid #2a2420;padding:4px 10px;border-radius:4px;cursor:pointer;font-size:0.75rem;min-width:30px;text-align:center}
+.pb:hover{background:#2a2420;color:#fbbf24}.pb.on{background:#fbbf24;color:#0f0c0a;border-color:#fbbf24;font-weight:700}
+.g{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:10px}
+.cd{background:#1a1614;border-radius:8px;overflow:hidden;border:1px solid #2a2420;transition:border-color .2s;display:flex;flex-direction:column;position:relative}
+.cd:hover{border-color:#fbbf24}
+.cv{width:100%;aspect-ratio:1/1.4;object-fit:cover;display:block;background:#2a2420}
+.if{padding:10px}
+.tt{font-size:0.8rem;font-weight:600;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tt.cn{color:#fbbf24}.tt.rw{color:#a8a29e;font-size:0.7rem}
+.mt{color:#57534e;font-size:0.65rem;margin:4px 0}
+.tr{display:flex;flex-wrap:wrap;gap:2px;margin:2px 0}
+.ta{background:#2a2420;color:#a8a29e;padding:1px 5px;border-radius:3px;font-size:0.6rem;white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis}
+.ta.au{background:#fbbf2415;color:#fbbf24}
+.lk{display:flex;gap:4px;margin-top:6px;flex-wrap:wrap}
+.lb{flex:1;text-align:center;padding:4px;border-radius:4px;text-decoration:none;font-size:0.65rem;font-weight:600}
+.lb.tp{background:#fbbf2415;color:#fbbf24;border:1px solid #fbbf2440}.lb.tp:hover{background:#fbbf24;color:#0f0c0a}
+.lb.tg{background:#1d4ed815;color:#60a5fa;border:1px solid #1d4ed840}.lb.tg:hover{background:#1d4ed8;color:#fff}
+.hide{display:none !important}
+.sb{background:#1a1614;color:#e7e0d9;border:1px solid #2a2420;padding:5px 10px;border-radius:5px;font-size:0.8rem;flex:1;min-width:150px;outline:none}
+.sb:focus{border-color:#fbbf24}
+#loading{text-align:center;padding:40px;color:#a8a29e}
+#error{text-align:center;padding:40px;color:#ef4444;display:none}
+#status{color:#a8a29e;font-size:0.75rem}
+@media(max-width:600px){.g{grid-template-columns:repeat(2,1fr)}.fb{max-height:80px}}
+</style>
+</head>
+<body>
+<div class="hd">
+<h1 onclick="location.reload()">🏳️🌈 Comic Gallery</h1>
+<button class="tgbtn" id="tgb" onclick="tg()">显示中文</button>
+<button class="tgbtn" onclick="fa()">🔄 重置</button>
+<input id="sb" class="sb" placeholder="🔍 搜索标题/标签/作者..." oninput="ss()">
+</div>
+<p class="sub"><span class="cnt" id="status">加载中...</span></p>
+<div class="sl">👤 作者筛选 (<span id="acnt">0</span>)</div>
+<div class="fb" id="ab"></div>
+<div class="sl">🏷 分类筛选 (<span id="tcnt">0</span>)</div>
+<div class="fb" id="cb"></div>
+<div class="pag" id="pag"></div>
+<div id="loading">加载数据中...</div>
+<div id="error"></div>
+<div class="g" id="g"></div>
+<div class="pag" id="pag2"></div>
+<script>
+var ALL_DATA={}, allComics=[], allTags=[], allAuthors=[];
+var sc=false, cp=1, totalPages=1, perPage=20;
+var selAuthors=[], selTags=[], searchQ='';
+var filtered=[];
+
+function esc(s){var d=document.createElement('div');d.textContent=s;return d.innerHTML;}
+function getVal(obj,key){return obj[key]||'';}
+
+function renderCard(c){
+  var cd=document.createElement('div');cd.className='cd';
+  var img=document.createElement('img');img.className='cv';img.src=c.cover_url;img.loading='lazy';
+  img.onerror=function(){this.style.display='none'};
+  cd.appendChild(img);
+  var di=document.createElement('div');di.className='if';
+  var cn=document.createElement('div');cn.className='tt cn';cn.textContent=c.title_cn;di.appendChild(cn);
+  var rw=document.createElement('div');rw.className='tt rw';rw.textContent=c.title_original;di.appendChild(rw);
+  var mt=document.createElement('div');mt.className='mt';
+  mt.textContent='📅 '+c.published_at+' · 📄 '+c.pages+'P · ⭐ '+c.stars;
+  di.appendChild(mt);
+  if(c.author){
+    var sl1=document.createElement('div');sl1.className='sl';sl1.textContent='👤 作者';di.appendChild(sl1);
+    var tr1=document.createElement('div');tr1.className='tr';
+    var au=document.createElement('span');au.className='ta au';au.textContent=c.author;tr1.appendChild(au);
+    di.appendChild(tr1);
+  }
+  var sl2=document.createElement('div');sl2.className='sl';sl2.textContent='🏷 分类';di.appendChild(sl2);
+  var tr2=document.createElement('div');tr2.className='tr';
+  for(var i=0;i<c.tags.length;i++){var tg=document.createElement('span');tg.className='ta';tg.textContent=c.tags[i];tr2.appendChild(tg);}
+  di.appendChild(tr2);
+  var lk=document.createElement('div');lk.className='lk';
+  if(c.telegraph_url){var tp=document.createElement('a');tp.href=c.telegraph_url;tp.target='_blank';tp.className='lb tp';tp.textContent='📖 阅读';lk.appendChild(tp);}
+  if(c.telegram_url){var tl=document.createElement('a');tl.href=c.telegram_url;tl.target='_blank';tl.className='lb tg';tl.textContent='📱 Telegram';lk.appendChild(tl);}
+  di.appendChild(lk);
+  cd.appendChild(di);
+  return cd;
+}
+
+function applyFilter(){
+  var q=searchQ.toLowerCase();
+  filtered=allComics.filter(function(c){
+    var ma=true;
+    if(selAuthors.length){
+      var found=false;
+      for(var i=0;i<selAuthors.length;i++){if(c.author===selAuthors[i]){found=true;break;}}
+      if(!found)ma=false;
+    }
+    if(ma&&selTags.length){
+      var found=false;
+      for(var i=0;i<selTags.length;i++){if(c.tags.indexOf(selTags[i])>=0){found=true;break;}}
+      if(!found)ma=false;
+    }
+    if(ma&&q){
+      var match=q.split(' ').filter(function(x){return x;});
+      for(var i=0;i<match.length;i++){
+        var kw=match[i];
+        var inTitle=(c.title_cn&&c.title_cn.toLowerCase().indexOf(kw)>=0)||(c.title_original&&c.title_original.toLowerCase().indexOf(kw)>=0);
+        var inAuthor=c.author&&c.author.toLowerCase().indexOf(kw)>=0;
+        var inTags=false;
+        for(var j=0;j<c.tags.length;j++){if(c.tags[j].toLowerCase().indexOf(kw)>=0){inTags=true;break;}}
+        if(!inTitle&&!inAuthor&&!inTags){ma=false;break;}
+      }
+    }
+    return ma;
+  });
+  totalPages=Math.max(1,Math.ceil(filtered.length/perPage));
+  document.getElementById('status').textContent='显示 '+Math.min(filtered.length,perPage)+' / '+filtered.length+' 本 (共'+allComics.length+'本)';
+  document.getElementById('acnt').textContent='('+selAuthors.length+'/'+allAuthors.length+')';
+  document.getElementById('tcnt').textContent='('+selTags.length+'/'+allTags.length+')';
+  renderPage(1);
+}
+
+function renderPage(p){
+  cp=Math.max(1,Math.min(p,totalPages));
+  var start=(cp-1)*perPage,end=Math.min(start+perPage,filtered.length);
+  var g=document.getElementById('g');g.innerHTML='';
+  for(var i=start;i<end;i++){g.appendChild(renderCard(filtered[i]));}
+  renderPagination();applyTitleToggle();
+}
+
+function renderPagination(){
+  var tp=totalPages,s=Math.max(0,cp-6),e=Math.min(tp,cp+4);
+  var h='';
+  if(s>0){h+='<button class="pb" onclick="renderPage(1)">1</button>';if(s>1)h+='<span class="cnt" style="margin:0 5px">...</span>';}
+  for(var i=s;i<e;i++)h+='<button class="pb'+(i+1===cp?' on':'')+'" onclick="renderPage('+(i+1)+')">'+(i+1)+'</button>';
+  if(e<tp){if(e<tp-1)h+='<span class="cnt" style="margin:0 5px">...</span>';h+='<button class="pb" onclick="renderPage('+tp+')">'+tp+'</button>';}
+  document.getElementById('pag').innerHTML=h;document.getElementById('pag2').innerHTML=h;
+}
+
+function ft(type,name){
+  var arr=type==='author'?selAuthors:selTags;
+  var idx=arr.indexOf(name);
+  if(idx>=0)arr.splice(idx,1);else arr.push(name);
+  applyFilter();updateButtons();
+}
+
+function updateButtons(){
+  var ab=document.getElementById('ab'),cb=document.getElementById('cb');
+  ab.innerHTML='';cb.innerHTML='';
+  for(var i=0;i<allAuthors.length;i++){
+    var b=document.createElement('button');b.className='tb'+(selAuthors.indexOf(allAuthors[i].name)>=0?' on':'');
+    b.textContent=allAuthors[i].name+' ('+allAuthors[i].count+')';
+    b.onclick=(function(n){return function(){ft('author',n);}})(allAuthors[i].name);
+    ab.appendChild(b);
+  }
+  for(var i=0;i<allTags.length;i++){
+    var b=document.createElement('button');b.className='tb'+(selTags.indexOf(allTags[i].name)>=0?' on':'');
+    b.textContent=allTags[i].name+' ('+allTags[i].count+')';
+    b.onclick=(function(n){return function(){ft('tag',n);}})(allTags[i].name);
+    cb.appendChild(b);
+  }
+}
+
+function fa(){selAuthors=[];selTags=[];searchQ='';document.getElementById('sb').value='';applyFilter();updateButtons();}
+function ss(){searchQ=document.getElementById('sb').value.trim();applyFilter();}
+function tg(){sc=!sc;document.getElementById('tgb').textContent=sc?'显示中文':'显示原标题';document.getElementById('tgb').classList.toggle('on',!sc);applyTitleToggle();}
+function applyTitleToggle(){document.querySelectorAll('.tt.cn').forEach(function(e){e.style.display=sc?'none':''});document.querySelectorAll('.tt.rw').forEach(function(e){e.style.display=sc?'':'none'});}
+
+// Load data
+fetch('comics.json').then(function(r){return r.json()}).then(function(d){
+  ALL_DATA=d;allComics=d.comics;allTags=d.tags;allAuthors=d.authors;
+  document.getElementById('loading').style.display='none';
+  document.getElementById('acnt').textContent='('+allAuthors.length+')';
+  document.getElementById('tcnt').textContent='('+allTags.length+')';
+  updateButtons();applyFilter();
+}).catch(function(e){
+  document.getElementById('loading').style.display='none';
+  document.getElementById('error').style.display='block';
+  document.getElementById('error').textContent='加载失败: '+e;
+});
+</script>
+</body>
+</html>
