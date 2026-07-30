@@ -85,7 +85,7 @@ export async function onRequest(context) {
         sql += ' AND ' + conditions.join(' AND ');
       }
 
-      sql += ' ORDER BY id DESC';
+      sql += ' ORDER BY published_at DESC, id DESC';
 
       if (size > 0) {
         const offset = (page - 1) * size;

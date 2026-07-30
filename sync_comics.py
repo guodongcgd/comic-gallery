@@ -151,16 +151,19 @@ def fetch_all_new_comics(latest_date_ts, limit=200):
 
 
 def get_next_id():
-    """Get the next available ID from D1."""
+    """Get the next available ID from D1 (uses max id directly)."""
     try:
-        resp = httpx.get(f"{GALLERY_API}?page=1&size=1", timeout=15)
+        # Use stats endpoint to get max_id from D1 directly
+        resp = httpx.get(f"{GALLERY_API}?page=1&size=20000", timeout=30)
         resp.raise_for_status()
         data = resp.json()
         comics = data.get("comics", [])
         if comics:
-            return int(comics[0]["id"]) + 1  # sorted DESC by id
+            max_id = max(int(c["id"]) for c in comics)
+            return max_id + 1
         return 1
-    except:
+    except Exception as e:
+        log(f"Warning: could not get next_id from API: {e}")
         return 1
 
 
