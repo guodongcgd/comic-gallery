@@ -298,7 +298,26 @@ function esc(s){const d=document.createElement('div');d.textContent=(s==null?'':
 // 封面走 Cloudflare 边缘缓存代理，加快国内加载
 function coverUrl(u){return u?'/api/cover?u='+encodeURIComponent(u):'';}
 function fmtDate(s){if(!s)return '?';const m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);return m?m[1]+'.'+m[2]+'.'+m[3]:s.slice(0,10);}
-function saveFavs(){localStorage.setItem('cg_favs',JSON.stringify([...favs]));}
+// 收藏已迁移到数据库（D1），localStorage 仅做一次性迁移读取
+async function loadFavs(){
+  let local=[];
+  try{local=JSON.parse(localStorage.getItem('cg_favs')||'[]');}catch(e){}
+  let dbIds=[];
+  try{
+    const r=await fetch('/api/favorites');
+    const d=await r.json();
+    dbIds=Array.isArray(d.ids)?d.ids:[];
+  }catch(e){console.log('load favorites error',e);}
+  // 迁移：本地有而数据库没有的 → 批量写入数据库
+  const localOnly=local.filter(id=>!dbIds.includes(id));
+  if(localOnly.length){
+    try{
+      await fetch('/api/favorites',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:localOnly})});
+    }catch(e){console.log('fav migrate error',e);}
+  }
+  favs=new Set([...dbIds,...local]);
+  try{localStorage.removeItem('cg_favs');}catch(e){}
+}
 function toast(msg){const t=$('toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._h);t._h=setTimeout(()=>t.classList.remove('show'),2200);}
 
 // ── 卡片渲染（书架上的书）──
@@ -465,12 +484,26 @@ function resetAll(){
 function clearSearch(){searchQ='';$('sb').value='';page=1;applyFilter();}
 function setSort(v){sortBy=v;page=1;applyFilter();}
 function toggleFavOnly(){favOnly=!favOnly;page=1;applyFilter();updateTopBtns();}
-function toggleFav(id){
-  favs.has(id)?favs.delete(id):favs.add(id);
-  saveFavs();updateFavCount();
+async function toggleFav(id){
+  const on=favs.has(id);
+  on?favs.delete(id):favs.add(id);
+  updateFavCount();
   document.querySelectorAll('.cd[data-id="'+id+'"] .fav').forEach(f=>f.classList.toggle('on',favs.has(id)));
-  const mf=$('m-fav-btn');if(mf)mf.classList.toggle('on',favs.has(id));
-  toast(favs.has(id)?'已藏入书架':'已移出书架');
+  const mf=$('m-fav-btn');if(mf){mf.classList.toggle('on',favs.has(id));mf.textContent=favs.has(id)?'已藏入书架 ✓':'藏入书架';}
+  try{
+    const r=on
+      ?await fetch('/api/favorites?comic_id='+id,{method:'DELETE'})
+      :await fetch('/api/favorites',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({comic_id:id})});
+    if(!r.ok)throw new Error('sync fail');
+    toast(on?'已移出书架':'已藏入书架');
+  }catch(e){
+    // 同步失败回滚
+    on?favs.add(id):favs.delete(id);
+    updateFavCount();
+    document.querySelectorAll('.cd[data-id="'+id+'"] .fav').forEach(f=>f.classList.toggle('on',favs.has(id)));
+    if(mf){mf.classList.toggle('on',favs.has(id));mf.textContent=favs.has(id)?'已藏入书架 ✓':'藏入书架';}
+    toast('收藏同步失败，请重试');
+  }
 }
 function updateFavCount(){const n=ALL.filter(c=>favs.has(c.id)).length;$('fav-n').textContent=n;}
 function updateTopBtns(){
@@ -734,6 +767,7 @@ function finishLoad(){
     await loadViaAPI();
     await loadPikPakRecords();
     await loadDeletedComics();
+    await loadFavs();
     finishLoad();
     return;
   }catch(e){console.log('D1 API error, fallback to comics.json',e);}
