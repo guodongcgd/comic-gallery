@@ -128,7 +128,9 @@ def fetch_all_new_comics(latest_date_ts, limit=200):
 
         for hit in hits:
             ts = hit.get("postedTimestamp", 0)
-            if ts > latest_date_ts:
+            # postedTimestamp is in MILLISECONDS, convert to seconds for comparison
+            ts_sec = ts / 1000 if ts > 1e12 else ts
+            if ts_sec > latest_date_ts:
                 new_comics.append(hit)
 
         total_pages = data.get("totalPages", 1)
@@ -136,7 +138,9 @@ def fetch_all_new_comics(latest_date_ts, limit=200):
 
         if page >= total_pages:
             break
-        if hits and hits[-1].get("postedTimestamp", 0) <= latest_date_ts:
+        last_ts = hits[-1].get("postedTimestamp", 0)
+        last_ts_sec = last_ts / 1000 if last_ts > 1e12 else last_ts
+        if hits and last_ts_sec <= latest_date_ts:
             log(f"  Reached cutoff at page {page}, stopping")
             break
 
