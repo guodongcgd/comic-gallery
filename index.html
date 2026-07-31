@@ -336,7 +336,7 @@ function renderCard(c){
   if(c.tags&&c.tags.length){const tgx=document.createElement('div');tgx.className='tgx';tgx.textContent=c.tags.slice(0,4).join(' / ');di.appendChild(tgx);}
   // 动作：文字链接
   const lk=document.createElement('div');lk.className='lk';
-  if(c.telegraph_url){const a=document.createElement('a');a.href=c.telegraph_url;a.target='_blank';a.rel='noopener';a.className='lb tp';a.textContent='阅读';lk.appendChild(a);}
+  if(c.telegraph_url){const a=document.createElement('a');a.href=API_BASE+'/read?u='+encodeURIComponent(c.telegraph_url)+'&t='+DL_TOKEN;a.target='_blank';a.rel='noopener';a.className='lb tp';a.textContent='阅读';lk.appendChild(a);}
   if(c.telegram_url){const a=document.createElement('a');a.href=c.telegram_url;a.target='_blank';a.rel='noopener';a.className='lb tg';a.textContent='Telegram';lk.appendChild(a);}
   const pk=document.createElement('button');pk.className='lb';pk.type='button';
   pk.dataset.comicId=c.id;pk.dataset.url=c.telegraph_url||'';pk.dataset.title=c.title_cn||c.title_original||'';
@@ -503,7 +503,7 @@ function openModal(c){
   const m=$('detail-modal');
   const tagsHtml=(Array.isArray(c.tags)?c.tags:[]).map(t=>'<span class="m-tag" onclick="tagFromModal(\''+encArg(t)+'\')">'+esc(t)+'</span>').join('');
   const authorHtml=c.author?'<div class="m-sec">作者</div><div class="m-tags"><span class="m-tag" style="color:var(--rose);border-color:rgba(224,90,127,.4)" onclick="authorFromModal(\''+encArg(c.author)+'\')">'+esc(c.author)+'</span></div>':'';
-  const readHtml=c.telegraph_url?'<a class="lb tp" href="'+esc(c.telegraph_url)+'" target="_blank" rel="noopener">阅读</a>':'';
+  const readHtml=c.telegraph_url?'<a class="lb tp" href="'+API_BASE+'/read?u='+encodeURIComponent(c.telegraph_url)+'&t='+DL_TOKEN+'" target="_blank" rel="noopener">阅读</a>':'';
   const tgHtml=c.telegram_url?'<a class="lb tg" href="'+esc(c.telegram_url)+'" target="_blank" rel="noopener">Telegram</a>':'';
   m.innerHTML=
     '<div class="m-head">'+
