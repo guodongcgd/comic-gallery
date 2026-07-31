@@ -215,6 +215,7 @@ body.manage .cb-wrap{display:block}
       <button class="tbtn" id="fav-btn" onclick="toggleFavOnly()" title="只看收藏">收藏 <span class="n" id="fav-n">0</span></button>
       <button class="tbtn" id="orig-btn" onclick="tg()" title="切换中文/原名显示">原名</button>
       <button class="tbtn" id="mng-btn" onclick="toggleManage()">管理</button>
+      <button class="tbtn" id="hbtn" onclick="toggleHidden()" title="查看被隐藏的漫画">隐藏区</button>
     </div>
   </div>
 </header>
@@ -251,7 +252,7 @@ body.manage .cb-wrap{display:block}
   <span class="cnt" id="del-cnt">已选 0 册</span>
   <button class="del-cancel" onclick="selectAllFiltered()">全选当前筛选</button>
   <button class="del-cancel" onclick="clearSelection()">取消</button>
-  <button class="del-go" onclick="showDeleteModal()">隐藏选中</button>
+  <button class="del-go" id="del-go-btn" onclick="showDeleteModal()">隐藏选中</button>
 </div>
 
 <!-- 详情弹窗 -->
@@ -262,7 +263,7 @@ body.manage .cb-wrap{display:block}
 <!-- 确认隐藏弹窗 -->
 <div class="modal-overlay" id="del-overlay" onclick="if(event.target===this)closeDelModal()">
   <div class="del-modal">
-    <h3>隐藏 <b id="del-count" style="color:var(--rose)">0</b> 册</h3>
+    <h3><span id="del-verb">隐藏</span> <b id="del-count" style="color:var(--rose)">0</b> 册</h3>
     <p>这些漫画将从书架中移除，不再出现在列表与搜索里。数据保留在数据库中，随时可以恢复。</p>
     <ul class="del-list" id="del-list"></ul>
     <div class="del-status" id="del-status"></div>
@@ -285,6 +286,7 @@ let ALL=[], TAGS=[], AUTHORS=[];
 let searchQ='', selAuthor=new Set(), selTag=new Set(), favOnly=false, showOrig=false;
 let sortBy='new', page=1, perPage=24, totalPages=1;
 let manage=false, filtered=[], selected=new Set(), deletedIds=new Set();
+let hiddenMode=false, HIDDEN=[];
 let favs=new Set(JSON.parse(localStorage.getItem('cg_favs')||'[]'));
 let gPikPakState={};
 
@@ -359,7 +361,7 @@ function renderGrid(){
   const g=$('g');g.innerHTML='';
   const start=(page-1)*perPage,end=Math.min(start+perPage,filtered.length);
   if(filtered.length===0){
-    g.innerHTML='<div class="empty" style="grid-column:1/-1"><span class="e-t">架上没有这样的书</span><small>换个关键词，或清除筛选条件</small><br><button onclick="resetAll()">清除全部筛选</button></div>';
+    g.innerHTML='<div class="empty" style="grid-column:1/-1"><span class="e-t">'+(hiddenMode?'隐藏区空空如也':'架上没有这样的书')+'</span><small>'+(!hiddenMode?'换个关键词，或清除筛选条件':'隐藏的漫画都在这里')+'</small><br><button onclick="resetAll()">清除全部筛选</button></div>';
     $('pag').style.display='none';
     return;
   }
@@ -373,8 +375,9 @@ function renderGrid(){
 // ── 筛选与排序 ──
 function applyFilter(){
   const q=searchQ.toLowerCase();
-  filtered=ALL.filter(c=>{
-    if(deletedIds.has(c.id))return false;
+  const src = hiddenMode ? HIDDEN : ALL;
+  filtered=src.filter(c=>{
+    if(!hiddenMode&&deletedIds.has(c.id))return false;
     if(favOnly&&!favs.has(c.id))return false;
     if(selAuthor.size&&!selAuthor.has(c.author))return false;
     if(selTag.size&&!c.tags.some(t=>selTag.has(t)))return false;
@@ -398,7 +401,13 @@ function applyFilter(){
   totalPages=Math.max(1,Math.ceil(filtered.length/perPage));
   if(page>totalPages)page=totalPages;
   const shown=Math.min(filtered.length,perPage);
-  $('status').innerHTML='架上 <b>'+shown.toLocaleString()+'</b> / <b>'+filtered.length.toLocaleString()+'</b> 册 · 共 <b>'+ALL.length.toLocaleString()+'</b> 册';
+  if(hiddenMode){
+    $('status').innerHTML='隐藏区 <b>'+shown.toLocaleString()+'</b> / <b>'+filtered.length.toLocaleString()+'</b> 册 · 共 <b>'+HIDDEN.length.toLocaleString()+'</b> 册隐藏';
+    $('total-badge').textContent=HIDDEN.length.toLocaleString();
+  }else{
+    $('status').innerHTML='架上 <b>'+shown.toLocaleString()+'</b> / <b>'+filtered.length.toLocaleString()+'</b> 册 · 共 <b>'+ALL.length.toLocaleString()+'</b> 册';
+    $('total-badge').textContent=ALL.length.toLocaleString();
+  }
   renderGrid();
   renderActiveFilters();
   updateDelBar();
@@ -521,7 +530,39 @@ function tagFromModal(enc){closeModal();const t=decodeURIComponent(enc);selTag.a
 function authorFromModal(enc){closeModal();const a=decodeURIComponent(enc);selAuthor.add(a);page=1;applyFilter();renderChips();toast('已筛选作者：'+a);}
 function closeModal(){curComic=null;$('modal-overlay').style.display='none';}
 
-// ── 管理 / 选择 / 隐藏 ──
+// ── 管理 / 选择 / 隐藏 / 隐藏区 ──
+async function toggleHidden(){
+  hiddenMode=!hiddenMode;
+  const b=$('hbtn');
+  b.classList.toggle('on',hiddenMode);
+  b.textContent=hiddenMode?'返回书架':'隐藏区';
+  if(hiddenMode){
+    if(!HIDDEN.length){
+      $('status').textContent='载入隐藏区…';
+      try{
+        const r=await fetch('/api/comics/hidden');
+        const d=await r.json();
+        HIDDEN=(d.comics||[]).map(c=>{if(!Array.isArray(c.tags)){try{c.tags=JSON.parse(c.tags||'[]');}catch(e){c.tags=[];}}return c;});
+      }catch(e){
+        toast('隐藏区加载失败：'+e.message);
+        hiddenMode=false;b.classList.remove('on');b.textContent='隐藏区';
+        return;
+      }
+    }
+  }else{
+    // 返回书架：重新拉取可见数据（恢复的可能已回来）
+    try{
+      const r=await fetch('/api/comics');
+      const d=await r.json();
+      ALL=d.comics;
+    }catch(e){}
+    rebuildFacets();
+  }
+  selected.clear();
+  updateDelBar();
+  page=1;
+  applyFilter();
+}
 function toggleManage(){
   manage=!manage;
   document.body.classList.toggle('manage',manage);
@@ -544,14 +585,17 @@ function selectAllFiltered(){filtered.forEach(c=>selected.add(String(c.id)));upd
 function updateDelBar(){
   const bar=$('del-bar');
   $('del-cnt').textContent='已选 '+selected.size+' 册';
+  $('del-go-btn').textContent=hiddenMode?'恢复选中':'隐藏选中';
   bar.style.display=(manage&&selected.size)?'flex':'none';
 }
 function showDeleteModal(){
   if(!selected.size)return;
-  const btn=$('del-confirm-btn');btn.disabled=false;btn.textContent='确认隐藏';
+  const btn=$('del-confirm-btn');btn.disabled=false;btn.textContent=hiddenMode?'确认恢复':'确认隐藏';
+  $('del-verb').textContent=hiddenMode?'恢复':'隐藏';
   const list=$('del-list');list.innerHTML='';
   let count=0;
-  for(const c of ALL){
+  const src=hiddenMode?HIDDEN:ALL;
+  for(const c of src){
     if(selected.has(String(c.id))){
       count++;
       const li=document.createElement('li');
@@ -566,6 +610,7 @@ function showDeleteModal(){
 }
 function closeDelModal(){$('del-overlay').style.display='none';}
 async function confirmDelete(){
+  if(hiddenMode){confirmRestore();return;}
   const btn=$('del-confirm-btn');
   btn.disabled=true;btn.textContent='处理中…';
   const ids=[...selected];
@@ -597,6 +642,33 @@ function rebuildFacets(){
   TAGS=Object.entries(tc).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
   AUTHORS=Object.entries(ac).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
   renderChips();
+}
+
+// ── 恢复（隐藏区）──
+async function confirmRestore(){
+  const btn=$('del-confirm-btn');
+  btn.disabled=true;btn.textContent='处理中…';
+  const ids=[...selected].map(Number);
+  try{
+    const r=await fetch('/api/comics/restore',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids})});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.detail||r.status);
+    const restored=new Set(ids.map(String));
+    const back=HIDDEN.filter(c=>restored.has(String(c.id)));
+    HIDDEN=HIDDEN.filter(c=>!restored.has(String(c.id)));
+    ALL=ALL.concat(back);
+    ids.forEach(id=>deletedIds.delete(id));
+    $('del-status').textContent='✓ 已恢复 '+ids.length+' 册';
+    selected.clear();
+    closeDelModal();
+    rebuildFacets();
+    applyFilter();
+    updateDelBar();
+    toast('已恢复 '+ids.length+' 册');
+  }catch(e){
+    $('del-status').textContent='操作失败：'+e.message;
+    btn.disabled=false;btn.textContent='确认恢复';
+  }
 }
 
 // ── URL 状态同步 ──

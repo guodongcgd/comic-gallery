@@ -20,10 +20,38 @@ export async function onRequest(context) {
     const url = new URL(request.url);
     const path = url.pathname.replace(/\/+$/, '');
 
+    // --- HIDDEN LIST ---
+    // GET /api/comics/hidden — full records of hidden comics (JOIN comics)
+    if (path.endsWith('/hidden')) {
+      const { results } = await db.prepare(
+        `SELECT c.* FROM comics c JOIN deleted_comics d ON c.id = d.comic_id ORDER BY d.deleted_at DESC`
+      ).all();
+      for (const row of results) {
+        if (typeof row.tags === 'string') {
+          try { row.tags = JSON.parse(row.tags); } catch (_) { row.tags = []; }
+        }
+      }
+      return new Response(JSON.stringify({ comics: results, total: results.length }), { headers });
+    }
+
+    // --- RESTORE ---
+    // POST /api/comics/restore — batch restore hidden comics
+    if (path.endsWith('/restore') && request.method === 'POST') {
+      const body = await request.json();
+      const ids = (Array.isArray(body) ? body : (body.ids || [])).map(Number).filter(Boolean);
+      if (!ids.length) {
+        return new Response(JSON.stringify({ restored: 0 }), { headers });
+      }
+      const placeholders = ids.map(() => '?').join(',');
+      const { meta } = await db.prepare(
+        `DELETE FROM deleted_comics WHERE comic_id IN (${placeholders})`
+      ).bind(...ids).run();
+      return new Response(JSON.stringify({ restored: meta.changes ?? ids.length }), { headers });
+    }
+
     // --- STATS ---
     // GET /api/comics/stats
     if (path.endsWith('/stats')) {
-      // Load all tags and authors from DB to compute counts
       const { results } = await db.prepare(
         'SELECT tags, author FROM comics WHERE id NOT IN (SELECT comic_id FROM deleted_comics)'
       ).all();
