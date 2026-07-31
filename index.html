@@ -549,6 +549,7 @@ async function toggleHidden(){
         return;
       }
     }
+    rebuildFacets(HIDDEN);
   }else{
     // 返回书架：重新拉取可见数据（恢复的可能已回来）
     try{
@@ -559,6 +560,9 @@ async function toggleHidden(){
     rebuildFacets();
   }
   selected.clear();
+  // 切换视图时清空筛选，避免标签/作者集合错位
+  selAuthor.clear();selTag.clear();searchQ='';favOnly=false;
+  $('sb').value='';
   updateDelBar();
   page=1;
   applyFilter();
@@ -632,10 +636,11 @@ async function confirmDelete(){
     btn.disabled=false;btn.textContent='确认隐藏';
   }
 }
-function rebuildFacets(){
+function rebuildFacets(src){
   const tc={},ac={};
-  ALL.forEach(c=>{
-    if(deletedIds.has(c.id))return;
+  const base = src || ALL;
+  base.forEach(c=>{
+    if(!hiddenMode&&deletedIds.has(c.id))return;
     if(c.author)ac[c.author]=(ac[c.author]||0)+1;
     (c.tags||[]).forEach(t=>tc[t]=(tc[t]||0)+1);
   });
@@ -661,7 +666,7 @@ async function confirmRestore(){
     $('del-status').textContent='✓ 已恢复 '+ids.length+' 册';
     selected.clear();
     closeDelModal();
-    rebuildFacets();
+    rebuildFacets(hiddenMode ? HIDDEN : ALL);
     applyFilter();
     updateDelBar();
     toast('已恢复 '+ids.length+' 册');
