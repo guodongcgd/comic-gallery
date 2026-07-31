@@ -495,6 +495,15 @@ async function toggleFav(id){
       ?await fetch('/api/favorites?comic_id='+id,{method:'DELETE'})
       :await fetch('/api/favorites',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({comic_id:id})});
     if(!r.ok)throw new Error('sync fail');
+    // 收藏 = 必须可见：若该漫画在隐藏区，服务端已自动解除隐藏 → 前端同步移回书架
+    if(!on){
+      const hi=HIDDEN.findIndex(c=>c.id===id);
+      if(hi>=0){
+        const [moved]=HIDDEN.splice(hi,1);
+        ALL.push(moved);
+        if(hiddenMode){rebuildFacets();applyFilter();}
+      }
+    }
     toast(on?'已移出书架':'已藏入书架');
   }catch(e){
     // 同步失败回滚
@@ -656,22 +665,30 @@ async function confirmDelete(){
   const btn=$('del-confirm-btn');
   btn.disabled=true;btn.textContent='处理中…';
   const ids=[...selected];
-  // 收藏的漫画不可被隐藏——自动跳过
+  // 收藏的漫画不可被隐藏——自动跳过（前端过滤 + 服务端强制双重保护）
   const toDel=ids.filter(id=>!favs.has(parseInt(id)));
-  const skipped=ids.length-toDel.length;
+  const favSkipped=ids.length-toDel.length;
+  let apiSkipped=0;
   try{
     for(const id of toDel){
       const c=ALL.find(x=>String(x.id)===id);
       const r=await fetch('/api/deleted',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({comic_id:parseInt(id),title:c?(c.title_cn||c.title_original||''):''})});
-      if(r.ok)deletedIds.add(parseInt(id));
+      if(r.ok){
+        // 服务端仍可能拒绝（如收藏在其他设备刚添加）→ 计入跳过
+        const d=await r.json().catch(()=>({success:true}));
+        if(d&&d.success===false&&d.skipped){apiSkipped++;}
+        else{deletedIds.add(parseInt(id));}
+      }
     }
-    $('del-status').textContent='✓ 已隐藏 '+toDel.length+' 册'+(skipped?' · 收藏已自动跳过 '+skipped+' 册':'');
+    const hiddenCnt=toDel.length-apiSkipped;
+    const totalSkipped=favSkipped+apiSkipped;
+    $('del-status').textContent='✓ 已隐藏 '+hiddenCnt+' 册'+(totalSkipped?' · 收藏已自动跳过 '+totalSkipped+' 册':'');
     selected.clear();
     closeDelModal();
     rebuildFacets();
     applyFilter();
     updateDelBar();
-    toast('已隐藏 '+toDel.length+' 册'+(skipped?'，跳过收藏 '+skipped+' 册':''));
+    toast('已隐藏 '+hiddenCnt+' 册'+(totalSkipped?'，跳过收藏 '+totalSkipped+' 册':''));
   }catch(e){
     $('del-status').textContent='操作失败：'+e.message;
     btn.disabled=false;btn.textContent='确认隐藏';

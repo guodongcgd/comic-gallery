@@ -49,6 +49,8 @@ export async function onRequest(context) {
     const now = new Date().toISOString();
     for (const id of ids) {
       await stmt.bind(Number(id), now).run();
+      // 收藏 = 必须可见：自动解除该漫画的隐藏状态（先隐藏后收藏的场景）
+      await db.prepare('DELETE FROM deleted_comics WHERE comic_id = ?').bind(Number(id)).run();
     }
     return new Response(JSON.stringify({ ok: true, added: ids.length }), { headers: JSON_HEADERS });
   }

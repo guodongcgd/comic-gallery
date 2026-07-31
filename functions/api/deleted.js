@@ -31,6 +31,14 @@ export async function onRequest(context) {
       if (comic_id === undefined || comic_id === null) {
         return new Response(JSON.stringify({ error: 'comic_id is required' }), { status: 400, headers });
       }
+      // 收藏保护：收藏中的漫画不可被隐藏（服务端强制，前端跳过只是兜底）
+      const fav = await db.prepare('SELECT 1 FROM favorites WHERE comic_id = ?').bind(comic_id).first();
+      if (fav) {
+        return new Response(
+          JSON.stringify({ success: false, skipped: true, reason: 'favorite', comic_id }),
+          { headers }
+        );
+      }
       await db.prepare(
         'INSERT OR IGNORE INTO deleted_comics (comic_id, deleted_at, title) VALUES (?, ?, ?)'
       ).bind(comic_id, new Date().toISOString(), title || '').run();
