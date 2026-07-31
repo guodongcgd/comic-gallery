@@ -44,7 +44,7 @@ body{
 .tbtn.on{background:var(--amber);color:#1a1206;border-color:var(--amber);font-weight:700}
 .tbtn.warn.on{background:var(--red);color:#fff;border-color:var(--red)}
 /* ── Filters ── */
-.filters{max-width:1440px;margin:auto;padding:0 18px 10px}
+.filters{max-width:1440px;margin:auto;padding:10px 18px 0}
 .f-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px}
 .f-chip{display:inline-flex;align-items:center;gap:6px;background:var(--surface3);border:1px solid var(--border2);color:var(--text);font-size:.75rem;padding:4px 8px 4px 12px;border-radius:99px}
 .f-chip button{background:none;border:none;color:var(--dim);cursor:pointer;font-size:.85rem;line-height:1;padding:2px}
@@ -194,7 +194,9 @@ body.manage .cb-wrap{display:block}
       <button class="tbtn warn" id="mng-btn" onclick="toggleManage()">☰ 管理</button>
     </div>
   </div>
-  <div class="filters">
+</header>
+
+<div class="filters">
     <div class="f-row" id="active-filters" style="display:none"></div>
     <details class="f-sec" id="author-sec" open>
       <summary>👤 作者 <span class="n" id="acnt">0</span></summary>
@@ -204,8 +206,7 @@ body.manage .cb-wrap{display:block}
       <summary>🏷 分类 <span class="n" id="tcnt">0</span></summary>
       <div class="chips" id="cb"></div>
     </details>
-  </div>
-</header>
+</div>
 
 <main>
   <div class="bar">
