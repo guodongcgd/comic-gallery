@@ -288,8 +288,9 @@ let manage=false, filtered=[], selected=new Set(), deletedIds=new Set();
 let favs=new Set(JSON.parse(localStorage.getItem('cg_favs')||'[]'));
 let gPikPakState={};
 
-// PikPak 下载服务器（本地隧道）。改为 '' 可切回 Pages Function。
-const API_BASE='https://not-establishment-ebooks-ourselves.trycloudflare.com';
+// PikPak 下载服务器：固定域名隧道（dl.chenguodong.xyz），请求需带 X-DL-Token
+const API_BASE='https://dl.chenguodong.xyz';
+const DL_TOKEN='3fb38b4f2b055fd00203ef58a35b610c';
 
 function esc(s){const d=document.createElement('div');d.textContent=(s==null?'':String(s));return d.innerHTML;}
 function fmtDate(s){if(!s)return '?';const m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);return m?m[1]+'.'+m[2]+'.'+m[3]:s.slice(0,10);}
@@ -734,7 +735,7 @@ async function handlePikPakClick(el){
   try{
     const r=await fetch(API_BASE+'/api/download',{
       method:'POST',
-      headers:{'Content-Type':'application/json'},
+      headers:{'Content-Type':'application/json','X-DL-Token':DL_TOKEN},
       body:JSON.stringify({
         telegraph_url:el.dataset.url,
         title_cn:el.dataset.title,
@@ -753,7 +754,7 @@ async function handlePikPakClick(el){
     const maxWait=600;
     const timer=setInterval(async()=>{
       try{
-        const pr=await fetch(API_BASE+'/api/download/'+d.task_id);
+        const pr=await fetch(API_BASE+'/api/download/'+d.task_id,{headers:{'X-DL-Token':DL_TOKEN}});
         const pd=await pr.json();
         waited+=3;
         if(pd.status==='completed'){
