@@ -9,7 +9,7 @@ import os
 import re
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -25,12 +25,16 @@ def log(msg):
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
 
 
-def parse_date_ts(date_str):
-    """Parse date string to timestamp."""
+def parse_date_for_cmp(date_str):
+    """Parse date string for comparison. Returns timestamp int.
+    Source API timestamps are UTC; published_at strings are stored as UTC
+    (e.g. '2026-07-31 02:29:00' == 1785464940 UTC epoch)."""
     date_str = date_str.strip()
     for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"]:
         try:
             dt = datetime.strptime(date_str, fmt)
+            # Treat as UTC to match source postedTimestamp (UTC epoch ms / 1000)
+            dt = dt.replace(tzinfo=timezone.utc)
             return int(dt.timestamp())
         except ValueError:
             continue
@@ -229,7 +233,7 @@ def main():
 
     # Get latest date from D1
     latest_date = get_latest_date_from_d1()
-    latest_ts = parse_date_ts(latest_date)
+    latest_ts = parse_date_for_cmp(latest_date)
     log(f"Latest comic date from D1: {latest_date} (ts={latest_ts})")
 
     # Fetch new comics from API
