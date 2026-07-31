@@ -3,10 +3,26 @@
 // Usage: /api/cover?u=<encoded original url>
 const ALLOWED = /^(telegra\.ph|img[0-9]*\.teletype\.in|teletype\.in|i[0-9]\.wp\.com|gateway\.ipfsscan\.io)$/i;
 
+async function countUsage(context, request) {
+  try {
+    const db = context.env.DB;
+    if (!db) return;
+    const today = new Date().toISOString().slice(0, 10);
+    await db.prepare(
+      `INSERT INTO cf_usage (date, cover_requests, cover_bytes) VALUES (?, 1, ?)
+       ON CONFLICT(date) DO UPDATE SET cover_requests = cover_requests + 1, cover_bytes = cover_bytes + excluded.cover_bytes`
+    ).bind(today, 0).run();
+  } catch (_) { /* counter is best-effort */ }
+}
+
 export async function onRequestGet(context) {
   const { request } = context;
   const url = new URL(request.url);
   const target = url.searchParams.get('u');
+
+  // 0. usage counter (async, best-effort) — 统计所有代理调用（含缓存命中）
+  context.waitUntil(countUsage(context, request));
+
   if (!target) {
     return new Response('missing u', { status: 400 });
   }
@@ -57,20 +73,5 @@ export async function onRequestGet(context) {
 
   // 3. store in edge cache (async, don't block response)
   context.waitUntil(cache.put(cacheKey, out.clone()));
-  // 4. usage counter (async, best-effort) — 图片代理请求量统计
-  context.waitUntil(
-    (async () => {
-      try {
-        const db = context.env.DB;
-        if (db) {
-          const today = new Date().toISOString().slice(0, 10);
-          await db.prepare(
-            `INSERT INTO cf_usage (date, cover_requests, cover_bytes) VALUES (?, 1, ?)
-             ON CONFLICT(date) DO UPDATE SET cover_requests = cover_requests + 1, cover_bytes = cover_bytes + excluded.cover_bytes`
-          ).bind(today, body.byteLength).run();
-        }
-      } catch (_) { /* counter is best-effort */ }
-    })()
-  );
   return out;
 }
