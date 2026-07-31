@@ -57,5 +57,20 @@ export async function onRequestGet(context) {
 
   // 3. store in edge cache (async, don't block response)
   context.waitUntil(cache.put(cacheKey, out.clone()));
+  // 4. usage counter (async, best-effort) — 图片代理请求量统计
+  context.waitUntil(
+    (async () => {
+      try {
+        const db = context.env.DB;
+        if (db) {
+          const today = new Date().toISOString().slice(0, 10);
+          await db.prepare(
+            `INSERT INTO cf_usage (date, cover_requests, cover_bytes) VALUES (?, 1, ?)
+             ON CONFLICT(date) DO UPDATE SET cover_requests = cover_requests + 1, cover_bytes = cover_bytes + excluded.cover_bytes`
+          ).bind(today, body.byteLength).run();
+        }
+      } catch (_) { /* counter is best-effort */ }
+    })()
+  );
   return out;
 }
