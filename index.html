@@ -284,7 +284,7 @@ const $=id=>document.getElementById(id);
 // ── 全局状态 ──
 let ALL=[], TAGS=[], AUTHORS=[];
 let searchQ='', selAuthor=new Set(), selTag=new Set(), favOnly=false, showOrig=false;
-let sortBy='new', page=1, perPage=24, totalPages=1;
+let sortBy='new', page=1, perPage=48, totalPages=1;
 let manage=false, filtered=[], selected=new Set(), deletedIds=new Set();
 let hiddenMode=false, HIDDEN=[];
 let favs=new Set(JSON.parse(localStorage.getItem('cg_favs')||'[]'));
