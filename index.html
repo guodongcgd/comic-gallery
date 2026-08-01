@@ -296,7 +296,7 @@ const DL_TOKEN='3fb38b4f2b055fd00203ef58a35b610c';
 
 function esc(s){const d=document.createElement('div');d.textContent=(s==null?'':String(s));return d.innerHTML;}
 // 封面走 Cloudflare 边缘缓存代理，加快国内加载
-function coverUrl(u){return u?'/api/cover?u='+encodeURIComponent(u):'';}
+function coverUrl(u, w){return u?'/api/cover?u='+encodeURIComponent(u)+(w?'&w='+w:''):'';}
 function fmtDate(s){if(!s)return '?';const m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);return m?m[1]+'.'+m[2]+'.'+m[3]:s.slice(0,10);}
 // 收藏已迁移到数据库（D1），localStorage 仅做一次性迁移读取
 async function loadFavs(){
@@ -338,7 +338,7 @@ function renderCard(c){
   const cvw=document.createElement('div');cvw.className='cvw';
   const ph=document.createElement('div');ph.className='ph';ph.textContent='無題';cvw.appendChild(ph);
   const img=document.createElement('img');img.className='cv';img.loading='lazy';img.alt=c.title_cn||'';
-  img.src=coverUrl(c.cover_url);img.onerror=function(){this.style.display='none';};
+  img.src=coverUrl(c.cover_url,480);img.onerror=function(){this.style.display='none';};
   cvw.appendChild(img);cd.appendChild(cvw);
   // 藏书标记
   const fav=document.createElement('div');fav.className='fav'+(favs.has(c.id)?' on':'');fav.textContent='藏';
@@ -549,7 +549,7 @@ function openModal(c){
   const tgHtml=c.telegram_url?'<a class="lb tg" href="'+esc(c.telegram_url)+'" target="_blank" rel="noopener">Telegram</a>':'';
   m.innerHTML=
     '<div class="m-head">'+
-      '<div class="m-cover"><img src="'+esc(coverUrl(c.cover_url))+'" onerror="this.style.display=\'none\'"></div>'+
+      '<div class="m-cover"><img src="'+esc(coverUrl(c.cover_url,900))+' " onerror="this.style.display=\'none\'"></div>'+
       '<div class="m-info">'+
         '<h2>'+esc(c.title_cn||'無題')+'</h2>'+
         (c.title_original?'<div class="m-orig">'+esc(c.title_original)+'</div>':'')+
