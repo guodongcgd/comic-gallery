@@ -19,8 +19,6 @@ export async function onRequestGet(context) {
   const { request } = context;
   const url = new URL(request.url);
   const target = url.searchParams.get('u');
-  // 宽度参数：列表 480，详情 900；缺省 480。按需缩放后边缘缓存小图
-  const w = Math.min(parseInt(url.searchParams.get('w')) || 480, 1200);
 
   // 0. usage counter (async, best-effort) — 统计所有代理调用（含缓存命中）
   context.waitUntil(countUsage(context, request));
@@ -47,20 +45,12 @@ export async function onRequestGet(context) {
     return cached;
   }
 
-  // 2. fetch upstream + Cloudflare Image Resizing（免费 100k 张/月）
-  //    resize: scale-down 只缩不放大；format avif→webp 按 Accept 协商，体积降 80%+
+  // 2. fetch upstream（+ CF 边缘缓存 7 天；免费计划无 Image Resizing，原图直出）
   let resp;
   try {
     resp = await fetch(upstream.toString(), {
       headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ComicGallery/1.0)' },
-      cf: {
-        cacheTtl: 604800,
-        image: {
-          resize: { width: w, fit: 'scale-down' },
-          format: 'auto',
-          quality: 78,
-        },
-      },
+      cf: { cacheTtl: 604800 },
     });
   } catch (_) {
     return new Response('upstream unreachable', { status: 502 });
