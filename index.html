@@ -295,8 +295,8 @@ const API_BASE='https://dl.chenguodong.xyz';
 const DL_TOKEN='3fb38b4f2b055fd00203ef58a35b610c';
 
 function esc(s){const d=document.createElement('div');d.textContent=(s==null?'':String(s));return d.innerHTML;}
-// 封面：COS 版直连（已压缩 480w webp，国内快）；旧 URL 走 CF 边缘代理
-function coverUrl(u, w){if(!u)return '';if(u.indexOf('myqcloud.com')>-1)return u;return '/api/cover?u='+encodeURIComponent(u)+(w?'&w='+w:'');}
+// 封面走 Cloudflare 边缘缓存代理，加快国内加载
+function coverUrl(u, w){return u?'/api/cover?u='+encodeURIComponent(u)+(w?'&w='+w:''):'';}
 function fmtDate(s){if(!s)return '?';const m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);return m?m[1]+'.'+m[2]+'.'+m[3]:s.slice(0,10);}
 // 收藏已迁移到数据库（D1），localStorage 仅做一次性迁移读取
 async function loadFavs(){

@@ -45,7 +45,7 @@ export async function onRequestGet(context) {
     return cached;
   }
 
-  // 2. fetch upstream（+ CF 边缘缓存 7 天；免费计划无 Image Resizing，原图直出）
+  // 2. fetch upstream
   let resp;
   try {
     resp = await fetch(upstream.toString(), {
