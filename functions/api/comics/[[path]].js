@@ -165,8 +165,8 @@ export async function onRequest(context) {
           const { results } = await db.prepare(
             `SELECT COUNT(*) as cnt FROM comics WHERE telegram_url = ? OR telegraph_url = ?
              UNION ALL
-             SELECT COUNT(*) FROM deleted_comics WHERE telegram_url = ?`
-          ).bind(telegramUrl, telegraphUrl, telegramUrl).all();
+             SELECT COUNT(*) FROM deleted_comics WHERE telegraph_url = ? OR telegram_url = ?`
+          ).bind(telegramUrl, telegraphUrl, telegraphUrl, telegramUrl).all();
           const totalCnt = results.reduce((sum, r) => sum + Object.values(r)[0], 0);
           if (totalCnt > 0) {
             continue; // Already exists or was deleted, skip

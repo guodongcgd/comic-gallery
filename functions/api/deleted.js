@@ -42,6 +42,17 @@ export async function onRequest(context) {
       await db.prepare(
         'INSERT OR IGNORE INTO deleted_comics (comic_id, deleted_at, title) VALUES (?, ?, ?)'
       ).bind(comic_id, new Date().toISOString(), title || '').run();
+      // 同步回填 telegraph_url/telegram_url（同步脚本防复活的关键字段）
+      try {
+        const c = await db.prepare(
+          'SELECT telegraph_url, telegram_url FROM comics WHERE id = ?'
+        ).bind(comic_id).first();
+        if (c && (c.telegraph_url || c.telegram_url)) {
+          await db.prepare(
+            'UPDATE deleted_comics SET telegraph_url = ?, telegram_url = ? WHERE comic_id = ?'
+          ).bind(c.telegraph_url || '', c.telegram_url || '', comic_id).run();
+        }
+      } catch (_) { /* 老表无此列时忽略 */ }
       return new Response(JSON.stringify({ success: true }), { headers });
     }
 
