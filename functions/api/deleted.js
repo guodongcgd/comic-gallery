@@ -39,48 +39,27 @@ export async function onRequest(context) {
         return new Response(JSON.stringify({ error: 'comic_id is required' }), { status: 400, headers });
       }
 
-      // 收藏保护：收藏中的漫画不可被隐藏（服务端强制）——按 D1 变量上限分批(每批90)
+      // 收藏保护：收藏中的漫画不可被隐藏（服务端强制）— 收藏表很小, 一次全查
       const favIds = new Set();
-      const BATCH = 90;
-      for (let i = 0; i < items.length; i += BATCH) {
-        const chunk = items.slice(i, i + BATCH);
-        const favRows = await db.prepare(
-          `SELECT comic_id FROM favorites WHERE comic_id IN (${chunk.map(() => '?').join(',')})`
-        ).bind(...chunk.map(x => x.comic_id)).all();
-        for (const r of favRows.results) favIds.add(r.comic_id);
-      }
+      const favRows = await db.prepare('SELECT comic_id FROM favorites').all();
+      for (const r of favRows.results) favIds.add(r.comic_id);
 
       const now = new Date().toISOString();
-      // 先取这些漫画的 telegraph_url/telegram_url（按批查询）
-      const urlMap = {};
-      for (let i = 0; i < items.length; i += BATCH) {
-        const chunk = items.slice(i, i + BATCH);
-        const urlRows = await db.prepare(
-          `SELECT id, telegraph_url, telegram_url FROM comics WHERE id IN (${chunk.map(() => '?').join(',')})`
-        ).bind(...chunk.map(x => x.comic_id)).all();
-        for (const r of urlRows.results) urlMap[r.id] = r;
+      // 前端已直接传 telegraph_url/telegram_url, 无需再查 comics 表
+      // 用 db.batch() 批量执行 INSERT — 一次 D1 调用执行最多 100 条语句, 彻底规避 invocation 调用次数限制
+      const stmts = [];
+      const base = db.prepare(
+        'INSERT OR IGNORE INTO deleted_comics (comic_id, deleted_at, title, telegraph_url, telegram_url) VALUES (?, ?, ?, ?, ?)'
+      );
+      for (const it of items) {
+        if (favIds.has(it.comic_id)) continue; // 收藏跳过
+        stmts.push(base.bind(it.comic_id, now, it.title || '', it.telegraph_url || '', it.telegram_url || ''));
       }
-
-      // 多行 VALUES 批量 INSERT（一次 D1 调用插多行，URL 直接带入）→ 大幅减少 D1 调用次数
-      // D1 SQL 变量上限 100：每行 5 个变量 → 每批最多 20 行
       let hidden = 0;
-      const ROW_BATCH = 20;
-      for (let i = 0; i < items.length; i += ROW_BATCH) {
-        const chunk = items.slice(i, i + ROW_BATCH);
-        const vals = [];
-        const params = [];
-        for (const it of chunk) {
-          if (favIds.has(it.comic_id)) continue; // 收藏跳过
-          const c = urlMap[it.comic_id] || {};
-          vals.push('(?, ?, ?, ?, ?)');
-          params.push(it.comic_id, now, it.title || '', c.telegraph_url || '', c.telegram_url || '');
-        }
-        if (!vals.length) continue;
-        const r = await db.prepare(
-          `INSERT OR IGNORE INTO deleted_comics (comic_id, deleted_at, title, telegraph_url, telegram_url)
-           VALUES ${vals.join(',')}`
-        ).bind(...params).run();
-        hidden += r.meta.changes || 0;
+      const BATCH = 100;
+      for (let i = 0; i < stmts.length; i += BATCH) {
+        const res = await db.batch(stmts.slice(i, i + BATCH));
+        for (const r of res) hidden += r.meta.changes || 0;
       }
       const skipped = items.length - hidden;
       return new Response(JSON.stringify({

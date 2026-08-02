@@ -798,7 +798,8 @@ async function confirmDelete(){
     // 批量提交（分块, 每块 500 条）——避免超大列表单请求超限
     const items=toDel.map(id=>{
       const c=ALL.find(x=>String(x.id)===id);
-      return {comic_id:parseInt(id),title:c?(c.title_cn||c.title_original||''):''};
+      return {comic_id:parseInt(id),title:c?(c.title_cn||c.title_original||''):'',
+              telegraph_url:c?(c.telegraph_url||''):'',telegram_url:c?(c.telegram_url||''):''};
     });
     let totalHidden=0, totalSkipped=0;
     const CHUNK=500;
