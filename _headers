@@ -1,0 +1,13 @@
+/*
+  Cloudflare Pages _headers: 强制不缓存 HTML (保证每次拿到最新代码)
+  JS/CSS 等静态资源正常缓存, HTML 必须实时
+*/
+/
+  Cache-Control: no-cache, no-store, must-revalidate
+  Pragma: no-cache
+
+/*.html
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/api/*
+  Cache-Control: no-store
