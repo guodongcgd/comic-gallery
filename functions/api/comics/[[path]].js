@@ -53,15 +53,20 @@ export async function onRequest(context) {
     // GET /api/comics/stats
     if (path.endsWith('/stats')) {
       const { results } = await db.prepare(
-        'SELECT tags, author FROM comics WHERE id NOT IN (SELECT comic_id FROM deleted_comics)'
+        'SELECT tags, author, circle FROM comics WHERE id NOT IN (SELECT comic_id FROM deleted_comics)'
       ).all();
 
       const tagCount = {};
       const authorCount = {};
+      const circleCount = {};
       for (const row of results) {
         const author = (row.author || '').trim();
         if (author) {
           authorCount[author] = (authorCount[author] || 0) + 1;
+        }
+        const circle = (row.circle || '').trim();
+        if (circle) {
+          circleCount[circle] = (circleCount[circle] || 0) + 1;
         }
         try {
           const tags = JSON.parse(row.tags || '[]');
@@ -79,7 +84,11 @@ export async function onRequest(context) {
         .map(([name, count]) => ({ name, count }))
         .sort((a, b) => b.count - a.count);
 
-      return new Response(JSON.stringify({ tags, authors }), { headers });
+      const circles = Object.entries(circleCount)
+        .map(([name, count]) => ({ name, count }))
+        .sort((a, b) => b.count - a.count);
+
+      return new Response(JSON.stringify({ tags, authors, circles }), { headers });
     }
 
     // --- LIST ---
@@ -90,6 +99,7 @@ export async function onRequest(context) {
       const search = url.searchParams.get('search') || '';
       const author = url.searchParams.get('author') || '';
       const tag = url.searchParams.get('tag') || '';
+      const circle = url.searchParams.get('circle') || '';
 
       let sql = 'SELECT * FROM comics WHERE id NOT IN (SELECT comic_id FROM deleted_comics)';
       const params = [];
@@ -103,6 +113,10 @@ export async function onRequest(context) {
       if (author) {
         conditions.push('author = ?');
         params.push(author);
+      }
+      if (circle) {
+        conditions.push('circle = ?');
+        params.push(circle);
       }
       if (tag) {
         conditions.push("tags LIKE ?");
@@ -161,18 +175,23 @@ export async function onRequest(context) {
         const tagsJson = JSON.stringify(c.tags || []);
         await db.prepare(
           `INSERT OR IGNORE INTO comics 
-           (id, title_cn, title_original, cover_url, author, tags,
-            telegraph_url, telegram_url, published_at, pages, stars)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (title_cn, title_original, title_raw, cover_url, author, circle,
+            language, original_work, tags,
+            telegraph_url, telegram_url, file_id, published_at, pages, stars)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         ).bind(
-          c.id,
           c.title_cn || '',
           c.title_original || '',
+          c.title_raw || '',
           c.cover_url || '',
           c.author || '',
+          c.circle || '',
+          c.language || '',
+          c.original_work || '',
           tagsJson,
           c.telegraph_url || '',
           c.telegram_url || '',
+          c.file_id || '',
           c.published_at || '',
           c.pages || 0,
           c.stars || 0

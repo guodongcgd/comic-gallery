@@ -226,6 +226,10 @@ body.manage .cb-wrap{display:block}
     <summary>作者 <span class="n" id="acnt">0</span></summary>
     <div class="chips" id="ab"></div>
   </details>
+  <details class="f-sec" id="circle-sec">
+    <summary>团队 <span class="n" id="ccnt">0</span></summary>
+    <div class="chips" id="cib"></div>
+  </details>
   <details class="f-sec" id="tag-sec">
     <summary>标签 <span class="n" id="tcnt">0</span></summary>
     <div class="chips" id="cb"></div>
@@ -282,8 +286,8 @@ body.manage .cb-wrap{display:block}
 const $=id=>document.getElementById(id);
 
 // ── 全局状态 ──
-let ALL=[], TAGS=[], AUTHORS=[];
-let searchQ='', selAuthor=new Set(), selTag=new Set(), favOnly=false, showOrig=false;
+let ALL=[], TAGS=[], AUTHORS=[], CIRCLES=[];
+let searchQ='', selAuthor=new Set(), selCircle=new Set(), selTag=new Set(), favOnly=false, showOrig=false;
 let sortBy='new', page=1, perPage=48, totalPages=1;
 let manage=false, filtered=[], selected=new Set(), deletedIds=new Set();
 let hiddenMode=false, HIDDEN=[];
@@ -352,6 +356,7 @@ function renderCard(c){
   mt.textContent=fmtDate(c.published_at)+' · '+esc(c.pages||0)+'P · ★'+(c.stars||0);
   di.appendChild(mt);
   if(c.author){const au=document.createElement('div');au.className='au';au.textContent=c.author;di.appendChild(au);}
+  if(c.circle){const ci=document.createElement('div');ci.className='au';ci.textContent='团队：'+c.circle;di.appendChild(ci);}
   if(c.tags&&c.tags.length){const tgx=document.createElement('div');tgx.className='tgx';tgx.textContent=c.tags.slice(0,4).join(' / ');di.appendChild(tgx);}
   // 动作：文字链接
   const lk=document.createElement('div');lk.className='lk';
@@ -401,6 +406,7 @@ function applyFilter(){
     if(!hiddenMode&&deletedIds.has(c.id))return false;
     if(favOnly&&!favs.has(c.id))return false;
     if(selAuthor.size&&!selAuthor.has(c.author))return false;
+    if(selCircle.size&&!selCircle.has(c.circle))return false;
     if(selTag.size&&!c.tags.some(t=>selTag.has(t)))return false;
     if(q){
       const kws=q.split(/\s+/).filter(Boolean);
@@ -436,13 +442,19 @@ function applyFilter(){
 }
 
 function renderChips(){
-  const ab=$('ab'),cb=$('cb');
-  ab.innerHTML='';cb.innerHTML='';
+  const ab=$('ab'),cib=$('cib'),cb=$('cb');
+  ab.innerHTML='';cib.innerHTML='';cb.innerHTML='';
   AUTHORS.forEach(a=>{
     const b=document.createElement('button');b.className='chip'+(selAuthor.has(a.name)?' on':'');
     b.textContent=a.name+' '+a.count;
     b.onclick=()=>{selAuthor.has(a.name)?selAuthor.delete(a.name):selAuthor.add(a.name);page=1;applyFilter();renderChips();};
     ab.appendChild(b);
+  });
+  CIRCLES.forEach(a=>{
+    const b=document.createElement('button');b.className='chip'+(selCircle.has(a.name)?' on':'');
+    b.textContent=a.name+' '+a.count;
+    b.onclick=()=>{selCircle.has(a.name)?selCircle.delete(a.name):selCircle.add(a.name);page=1;applyFilter();renderChips();};
+    cib.appendChild(b);
   });
   TAGS.forEach(t=>{
     const b=document.createElement('button');b.className='chip'+(selTag.has(t.name)?' on':'');
@@ -451,6 +463,7 @@ function renderChips(){
     cb.appendChild(b);
   });
   $('acnt').textContent=selAuthor.size+'/'+AUTHORS.length;
+  $('ccnt').textContent=selCircle.size+'/'+CIRCLES.length;
   $('tcnt').textContent=selTag.size+'/'+TAGS.length;
 }
 
@@ -460,6 +473,7 @@ function renderActiveFilters(){
   if(searchQ)items.push({label:'检索：'+searchQ,clear:()=>{searchQ='';$('sb').value='';page=1;applyFilter();}});
   if(favOnly)items.push({label:'仅收藏',clear:()=>{favOnly=false;page=1;applyFilter();updateTopBtns();}});
   selAuthor.forEach(a=>items.push({label:'作者：'+a,clear:()=>{selAuthor.delete(a);page=1;applyFilter();renderChips();}}));
+  selCircle.forEach(a=>items.push({label:'团队：'+a,clear:()=>{selCircle.delete(a);page=1;applyFilter();renderChips();}}));
   selTag.forEach(t=>items.push({label:'标签：'+t,clear:()=>{selTag.delete(t);page=1;applyFilter();renderChips();}}));
   if(items.length===0){row.style.display='none';row.innerHTML='';return;}
   row.style.display='flex';
@@ -476,7 +490,7 @@ function renderActiveFilters(){
 }
 
 function resetAll(){
-  selAuthor.clear();selTag.clear();searchQ='';favOnly=false;
+  selAuthor.clear();selCircle.clear();selTag.clear();searchQ='';favOnly=false;
   $('sb').value='';page=1;sortBy='new';$('sort').value='new';
   applyFilter();renderChips();updateTopBtns();
   window.scrollTo({top:0,behavior:'smooth'});
@@ -695,15 +709,17 @@ async function confirmDelete(){
   }
 }
 function rebuildFacets(src){
-  const tc={},ac={};
+  const tc={},ac={},cc={};
   const base = src || ALL;
   base.forEach(c=>{
     if(!hiddenMode&&deletedIds.has(c.id))return;
     if(c.author)ac[c.author]=(ac[c.author]||0)+1;
+    if(c.circle)cc[c.circle]=(cc[c.circle]||0)+1;
     (c.tags||[]).forEach(t=>tc[t]=(tc[t]||0)+1);
   });
   TAGS=Object.entries(tc).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
   AUTHORS=Object.entries(ac).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
+  CIRCLES=Object.entries(cc).map(([name,count])=>({name,count})).sort((a,b)=>b.count-a.count);
   renderChips();
 }
 
@@ -739,6 +755,7 @@ function syncHash(){
   const p=new URLSearchParams();
   if(searchQ)p.set('q',searchQ);
   if(selAuthor.size)p.set('a',[...selAuthor].join(','));
+  if(selCircle.size)p.set('c',[...selCircle].join(','));
   if(selTag.size)p.set('t',[...selTag].join(','));
   if(sortBy!=='new')p.set('s',sortBy);
   if(page>1)p.set('p',page);
@@ -751,6 +768,7 @@ function readHash(){
   const p=new URLSearchParams(h);
   if(p.get('q')){searchQ=p.get('q');$('sb').value=searchQ;}
   (p.get('a')||'').split(',').filter(Boolean).forEach(x=>selAuthor.add(decodeURIComponent(x)));
+  (p.get('c')||'').split(',').filter(Boolean).forEach(x=>selCircle.add(decodeURIComponent(x)));
   (p.get('t')||'').split(',').filter(Boolean).forEach(x=>selTag.add(decodeURIComponent(x)));
   if(p.get('s')){sortBy=p.get('s');$('sort').value=sortBy;}
   if(p.get('p'))page=parseInt(p.get('p'))||1;
@@ -762,13 +780,13 @@ async function loadViaAPI(){
   $('status').textContent='载入中…';
   const r1=await fetch('/api/comics/stats');
   const d1=await r1.json();
-  TAGS=d1.tags;AUTHORS=d1.authors;
+  TAGS=d1.tags;AUTHORS=d1.authors;CIRCLES=d1.circles||[];
   const r2=await fetch('/api/comics');
   const d2=await r2.json();
   ALL=d2.comics;
 }
 function applyData(d){
-  ALL=d.comics;TAGS=d.tags;AUTHORS=d.authors;
+  ALL=d.comics;TAGS=d.tags;AUTHORS=d.authors;CIRCLES=d.circles||[];
 }
 function finishLoad(){
   ALL.forEach(c=>{if(!Array.isArray(c.tags)){try{c.tags=JSON.parse(c.tags||'[]');}catch(e){c.tags=[];}}});
