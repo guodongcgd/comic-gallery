@@ -45,6 +45,13 @@ export async function onRequest(context) {
       for (const r of favRows.results) favIds.add(r.comic_id);
 
       const now = new Date().toISOString();
+      // 安全保险：隐藏前先备份当前记录（防误删/误操作可撤销）
+      try {
+        await db.prepare(
+          `INSERT OR IGNORE INTO deleted_comics_backup (comic_id, deleted_at, title, telegraph_url, telegram_url, backed_up_at)
+           SELECT comic_id, deleted_at, title, telegraph_url, telegram_url, ? FROM deleted_comics`
+        ).bind(now).run();
+      } catch (_) { /* 备份表不存在时忽略 */ }
       // 前端已直接传 telegraph_url/telegram_url, 无需再查 comics 表
       // 用 db.batch() 批量执行 INSERT — 一次 D1 调用执行最多 100 条语句, 彻底规避 invocation 调用次数限制
       const stmts = [];

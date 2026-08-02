@@ -42,18 +42,61 @@ export async function onRequest(context) {
       if (!ids.length) {
         return new Response(JSON.stringify({ restored: 0 }), { headers });
       }
-      // D1 SQL 变量上限 ~100, 按批删除
-      let restored = 0;
+      // 安全保险：恢复前先把即将删除的记录备份到 deleted_comics_backup（防误恢复不可逆）
+      const now = new Date().toISOString();
       const BATCH = 90;
+      let restored = 0;
       for (let i = 0; i < ids.length; i += BATCH) {
         const chunk = ids.slice(i, i + BATCH);
         const placeholders = chunk.map(() => '?').join(',');
+        // 1) 备份即将删除的记录（INSERT OR IGNORE, 重复备份不覆盖）
+        await db.prepare(
+          `INSERT OR IGNORE INTO deleted_comics_backup (comic_id, deleted_at, title, telegraph_url, telegram_url, backed_up_at)
+           SELECT comic_id, deleted_at, title, telegraph_url, telegram_url, ? FROM deleted_comics WHERE comic_id IN (${placeholders})`
+        ).bind(now, ...chunk).run();
+        // 2) 删除
         const { meta } = await db.prepare(
           `DELETE FROM deleted_comics WHERE comic_id IN (${placeholders})`
         ).bind(...chunk).run();
         restored += meta.changes ?? chunk.length;
       }
-      return new Response(JSON.stringify({ restored }), { headers });
+      return new Response(JSON.stringify({ restored, backedUp: true }), { headers });
+    }
+
+    // POST /api/comics/restore/undo — undo a restore: put records back from backup
+    // body: {ids: [...]} 或 {all: true}（全部撤回）
+    if (path.endsWith('/restore/undo') && request.method === 'POST') {
+      const body = await request.json();
+      let where = '';
+      let params = [];
+      if (body.all) {
+        where = '';
+      } else {
+        const ids = (Array.isArray(body) ? body : (body.ids || [])).map(Number).filter(Boolean);
+        if (!ids.length) return new Response(JSON.stringify({ restored: 0 }), { headers });
+        const BATCH = 90;
+        let undone = 0;
+        for (let i = 0; i < ids.length; i += BATCH) {
+          const chunk = ids.slice(i, i + BATCH);
+          const placeholders = chunk.map(() => '?').join(',');
+          await db.prepare(
+            `INSERT OR IGNORE INTO deleted_comics (comic_id, deleted_at, title, telegraph_url, telegram_url)
+             SELECT comic_id, deleted_at, title, telegraph_url, telegram_url FROM deleted_comics_backup WHERE comic_id IN (${placeholders})`
+          ).bind(...chunk).run();
+          const { meta } = await db.prepare(
+            `DELETE FROM deleted_comics_backup WHERE comic_id IN (${placeholders})`
+          ).bind(...chunk).run();
+          undone += meta.changes ?? chunk.length;
+        }
+        return new Response(JSON.stringify({ undone }), { headers });
+      }
+      // all: 全部撤回备份
+      await db.prepare(
+        `INSERT OR IGNORE INTO deleted_comics (comic_id, deleted_at, title, telegraph_url, telegram_url)
+         SELECT comic_id, deleted_at, title, telegraph_url, telegram_url FROM deleted_comics_backup`
+      ).run();
+      const { meta } = await db.prepare('DELETE FROM deleted_comics_backup').run();
+      return new Response(JSON.stringify({ undone: meta.changes ?? 0 }), { headers });
     }
 
     // --- STATS ---
