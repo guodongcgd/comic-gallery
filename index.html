@@ -121,6 +121,11 @@ body.manage .cb-wrap{display:block}
 /* 分页 */
 .pag{display:flex;justify-content:center;gap:4px;margin-top:24px;flex-wrap:wrap}
 .pb{background:transparent;color:var(--muted);border:1px solid var(--line);padding:5px 11px;border-radius:3px;cursor:pointer;font-family:var(--mono);font-size:11px;min-width:30px;text-align:center;transition:color .12s,border-color .12s}
+.pb-dot{color:var(--faint);padding:0 4px}
+.pg-jump{display:inline-flex;align-items:center;gap:5px;margin-left:10px;vertical-align:middle}
+.pg-jump input{width:56px;background:var(--ink);border:1px solid var(--line2);color:var(--paper);border-radius:3px;padding:5px 6px;font-family:var(--mono);font-size:11px;text-align:center;outline:none}
+.pg-jump input:focus{border-color:var(--rose)}
+.pg-jump .pb{min-width:auto;padding:5px 9px}
 .pb:hover{color:var(--paper);border-color:var(--faint)}
 .pb.on{color:var(--rose);border-color:rgba(224,90,127,.5);background:var(--rose-soft)}
 .pb:disabled{opacity:.3;cursor:default}
@@ -560,7 +565,14 @@ function renderPagination(){
   for(let i=s;i<=e;i++)h+='<button class="pb'+(i===page?' on':'')+'" onclick="goPage('+i+')">'+i+'</button>';
   if(e<tp){if(e<tp-1)h+='<span class="pb-dot">…</span>';h+='<button class="pb" onclick="goPage('+tp+')">'+tp+'</button>';}
   h+='<button class="pb" '+(page>=tp?'disabled':'onclick="goPage('+(page+1)+')"')+'>›</button>';
+  h+='<span class="pg-jump"><input id="pg-input" type="number" min="1" max="'+tp+'" value="'+page+'" onkeydown="if(event.key===\'Enter\')jumpPage()"><button class="pb" onclick="jumpPage()">跳转</button></span>';
   $('pag').innerHTML=h;
+}
+function jumpPage(){
+  const inp=$('pg-input');if(!inp)return;
+  const p=parseInt(inp.value,10);
+  if(!isNaN(p)&&p>=1&&p<=totalPages){goPage(p);}
+  else{inp.value=page;toast('页码需在 1-'+totalPages+' 之间');}
 }
 function goPage(p){page=Math.max(1,Math.min(p,totalPages));renderGrid();window.scrollTo({top:0,behavior:'smooth'});}
 
