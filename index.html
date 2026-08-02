@@ -795,28 +795,32 @@ async function confirmDelete(){
   const favSkipped=ids.length-toDel.length;
   let apiSkipped=0;
   try{
-    // 批量提交（一次请求，服务端循环处理）——避免逐条串行请求又慢又易半途失败
+    // 批量提交（分块, 每块 500 条）——避免超大列表单请求超限
     const items=toDel.map(id=>{
       const c=ALL.find(x=>String(x.id)===id);
       return {comic_id:parseInt(id),title:c?(c.title_cn||c.title_original||''):''};
     });
-    const r=await fetch('/api/deleted',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
-    const d=await r.json().catch(()=>({}));
-    if(!r.ok){throw new Error(d.error||r.status);}
-    apiSkipped=d.skipped||0;
-    // 服务端成功隐藏的加入本地隐藏集
-    items.forEach(it=>{
-      if(!favs.has(it.comic_id))deletedIds.add(it.comic_id);
-    });
-    const hiddenCnt=toDel.length-apiSkipped;
-    const totalSkipped=favSkipped+apiSkipped;
-    $('del-status').textContent='✓ 已隐藏 '+hiddenCnt+' 册'+(totalSkipped?' · 收藏已自动跳过 '+totalSkipped+' 册':'');
+    let totalHidden=0, totalSkipped=0;
+    const CHUNK=500;
+    for(let i=0;i<items.length;i+=CHUNK){
+      const chunk=items.slice(i,i+CHUNK);
+      const r=await fetch('/api/deleted',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items:chunk})});
+      const d=await r.json().catch(()=>({}));
+      if(!r.ok){throw new Error((d.error||r.status)+'（第 '+(i/CHUNK+1)+' 批）');}
+      totalHidden+=(d.hidden||0);
+      totalSkipped+=(d.skipped||0);
+      chunk.forEach(it=>{if(!favs.has(it.comic_id))deletedIds.add(it.comic_id);});
+    }
+    apiSkipped=totalSkipped;
+    const hiddenCnt=totalHidden;
+    const totalSkippedAll=favSkipped+apiSkipped;
+    $('del-status').textContent='✓ 已隐藏 '+hiddenCnt+' 册'+(totalSkippedAll?' · 收藏已自动跳过 '+totalSkippedAll+' 册':'');
     selected.clear();
     closeDelModal();
     rebuildFacets();
     applyFilter();
     updateDelBar();
-    toast('已隐藏 '+hiddenCnt+' 册'+(totalSkipped?'，跳过收藏 '+totalSkipped+' 册':''));
+    toast('已隐藏 '+hiddenCnt+' 册'+(totalSkippedAll?'，跳过收藏 '+totalSkippedAll+' 册':''));
   }catch(e){
     $('del-status').textContent='操作失败：'+e.message;
     btn.disabled=false;btn.textContent='确认隐藏';
