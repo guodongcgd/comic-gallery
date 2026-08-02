@@ -151,6 +151,19 @@ body.manage .cb-wrap{display:block}
 .m-tags{display:flex;flex-wrap:wrap;gap:5px}
 .m-tag{background:transparent;border:1px solid var(--line);color:var(--muted);padding:2px 10px;border-radius:3px;cursor:pointer;font-size:12px;transition:color .12s,border-color .12s}
 .m-tag:hover{color:var(--rose);border-color:rgba(224,90,127,.45)}
+/* 标签编辑 */
+.m-tag-edit{margin-top:8px;display:inline-block;background:none;border:1px dashed var(--line2);color:var(--faint);padding:2px 12px;border-radius:3px;cursor:pointer;font-size:11px;transition:all .12s}
+.m-tag-edit:hover{color:var(--rose);border-color:rgba(224,90,127,.5)}
+.tag-edit-input{width:100%;background:var(--ink);border:1px solid var(--line2);color:var(--paper);border-radius:4px;padding:8px 10px;font-size:13px;margin-bottom:10px;outline:none}
+.tag-edit-input:focus{border-color:var(--rose)}
+.tag-edit-hint{color:var(--faint);font-size:11px;margin-bottom:10px;line-height:1.6}
+.tag-edit-row{display:flex;gap:8px}
+.tag-edit-btn{flex:1;padding:7px 0;border-radius:3px;border:1px solid var(--line2);background:transparent;color:var(--muted);cursor:pointer;font-size:12px;transition:all .12s}
+.tag-edit-btn:hover{color:var(--paper);border-color:var(--faint)}
+.tag-edit-btn.primary{background:var(--rose);border-color:var(--rose);color:#1a0f14;font-weight:600}
+.tag-edit-btn.primary:hover{opacity:.85}
+.tag-sug{display:inline-block;background:transparent;border:1px solid var(--line);color:var(--muted);padding:1px 8px;border-radius:3px;cursor:pointer;font-size:11px;margin:2px}
+.tag-sug:hover{color:var(--rose);border-color:rgba(224,90,127,.45)}
 .m-actions{display:flex;gap:16px;margin-top:18px;flex-wrap:wrap}
 .m-actions .lb{font-size:13px;padding:0;border:none;background:none}
 .m-fav{margin-top:14px;background:transparent;color:var(--muted);border:1px solid var(--line2);padding:7px 0;border-radius:3px;cursor:pointer;font-size:12px;transition:all .12s;width:100%}
@@ -574,7 +587,8 @@ function openModal(c){
           '<span>★<b>'+esc(c.stars||0)+'</b></span>'+
         '</div>'+
         authorHtml+
-        '<div class="m-sec">标签</div><div class="m-tags">'+(tagsHtml||'<span style="color:var(--faint);font-size:12px">无标签</span>')+'</div>'+
+        '<div class="m-sec">标签</div><div class="m-tags" id="m-tags-box">'+(tagsHtml||'<span style="color:var(--faint);font-size:12px">无标签</span>')+'</div>'+
+        '<button class="m-tag-edit" onclick="openTagEditor()">✎ 编辑标签</button>'+
         '<div class="m-actions">'+readHtml+tgHtml+
           '<button class="lb" type="button" style="color:var(--paper)" data-comic-id="'+esc(c.id)+'" data-url="'+esc(c.telegraph_url||'')+'" data-title="'+esc(c.title_cn||c.title_original||'')+'" data-title-orig="'+esc(c.title_original||'')+'" data-pages="'+esc(c.pages||0)+'" id="m-pk-btn">PikPak 下载</button>'+
         '</div>'+
@@ -586,6 +600,91 @@ function openModal(c){
 }
 function tagFromModal(enc){closeModal();const t=decodeURIComponent(enc);selTag.add(t);page=1;applyFilter();renderChips();toast('已筛选标签：'+t);}
 function authorFromModal(enc){closeModal();const a=decodeURIComponent(enc);selAuthor.add(a);page=1;applyFilter();renderChips();toast('已筛选作者：'+a);}
+
+// ── 标签编辑 ──
+let tagEditorState={suggestions:[]};
+function renderTagEditor(){
+  const c=curComic;if(!c)return;
+  const tags=Array.isArray(c.tags)?c.tags:[];
+  const box=$('m-tags-box');
+  if(!box)return;
+  const sugHtml=(tagEditorState.suggestions||[])
+    .filter(s=>!tags.includes(s))
+    .slice(0,12)
+    .map(s=>'<span class="tag-sug" onclick="addTag(\''+encArg(s)+'\')">+'+esc(s)+'</span>').join('');
+  box.innerHTML=
+    '<input class="tag-edit-input" id="tag-new-input" placeholder="输入标签，回车添加" value="" '+
+    'onkeydown="if(event.key===\'Enter\'){event.preventDefault();addTagFromInput();}">'+
+    '<div class="m-tags" id="tag-edit-list">'+tags.map((t,i)=>
+      '<span class="m-tag" style="cursor:default">'+esc(t)+
+      '<span style="cursor:pointer;margin-left:6px;color:var(--rose)" onclick="removeTag('+i+')" title="删除">✕</span></span>'
+    ).join('')+'</div>'+
+    (sugHtml?'<div style="margin-top:8px">'+sugHtml+'</div>':'')+
+    '<div class="tag-edit-hint" style="margin-top:8px">点击 ✕ 删除标签；回车添加新标签；下方灰色词为其他漫画常用标签，点击直接添加。</div>'+
+    '<div class="tag-edit-row">'+
+      '<button class="tag-edit-btn" onclick="cancelTagEditor()">取消</button>'+
+      '<button class="tag-edit-btn primary" onclick="saveTagEditor()">保存</button>'+
+    '</div>';
+  const inp=$('tag-new-input');if(inp)inp.focus();
+}
+function openTagEditor(){
+  // 载入常用标签建议（从当前统计取 top 标签）
+  if(!tagEditorState.suggestions.length){
+    fetch('/api/comics/stats').then(r=>r.json()).then(d=>{
+      tagEditorState.suggestions=(d.tags||[]).map(t=>t.name);
+      renderTagEditor();
+    }).catch(()=>renderTagEditor());
+  }else renderTagEditor();
+}
+function addTagFromInput(){
+  const inp=$('tag-new-input');if(!inp)return;
+  const t=inp.value.trim();if(!t)return;
+  if(!curComic.tags)curComic.tags=[];
+  if(!curComic.tags.includes(t))curComic.tags.push(t);
+  inp.value='';renderTagEditor();
+}
+function addTag(enc){
+  const t=decodeURIComponent(enc);
+  if(!curComic.tags)curComic.tags=[];
+  if(!curComic.tags.includes(t))curComic.tags.push(t);
+  renderTagEditor();
+}
+function removeTag(i){
+  if(!curComic.tags)return;
+  curComic.tags.splice(i,1);
+  renderTagEditor();
+}
+function cancelTagEditor(){
+  renderTagsStatic();
+}
+function renderTagsStatic(){
+  const c=curComic;if(!c)return;
+  const box=$('m-tags-box');if(!box)return;
+  const tags=Array.isArray(c.tags)?c.tags:[];
+  box.innerHTML=tags.map(t=>'<span class="m-tag" onclick="tagFromModal(\''+encArg(t)+'\')">'+esc(t)+'</span>').join('')||'<span style="color:var(--faint);font-size:12px">无标签</span>';
+}
+async function saveTagEditor(){
+  const c=curComic;if(!c)return;
+  const tags=Array.isArray(c.tags)?c.tags:[];
+  const btn=document.querySelector('.tag-edit-btn.primary');
+  if(btn){btn.disabled=true;btn.textContent='保存中…';}
+  try{
+    const r=await fetch('/api/comics?id='+c.id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({tags})});
+    const d=await r.json();
+    if(!r.ok)throw new Error(d.error||r.status);
+    toast('标签已保存');
+    renderTagsStatic();
+    // 同步 ALL 里的数据
+    const inAll=ALL.find(x=>x.id===c.id);
+    if(inAll)inAll.tags=tags.slice();
+    // 更新筛选统计
+    rebuildFacets();
+  }catch(e){
+    toast('保存失败：'+e.message);
+    renderTagEditor();
+  }
+  if(btn){btn.disabled=false;btn.textContent='保存';}
+}
 function closeModal(){curComic=null;$('modal-overlay').style.display='none';}
 
 // ── 管理 / 选择 / 隐藏 / 隐藏区 ──

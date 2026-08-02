@@ -7,7 +7,7 @@ export async function onRequest(context) {
 
   const headers = {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, PATCH, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Content-Type': 'application/json',
   };
@@ -200,6 +200,36 @@ export async function onRequest(context) {
       }
 
       return new Response(JSON.stringify({ success: true, added }), { headers });
+    }
+
+    // --- UPDATE TAGS ---
+    // PATCH /api/comics/:id  {tags: [...]}  — 替换整组标签
+    // PATCH /api/comics       {items: [{id, tags: [...]}, ...]}  — 批量
+    if (request.method === 'PATCH') {
+      const body = await request.json();
+      let updated = 0;
+
+      const applyTags = async (id, tags) => {
+        if (!Array.isArray(tags)) return false;
+        const clean = tags.map(t => String(t).trim()).filter(Boolean);
+        const dedup = [...new Set(clean)];
+        const tagsJson = JSON.stringify(dedup);
+        const r = await db.prepare(
+          'UPDATE comics SET tags = ? WHERE id = ?'
+        ).bind(tagsJson, id).run();
+        return r.meta.changes > 0;
+      };
+
+      if (body.items && Array.isArray(body.items)) {
+        for (const it of body.items) {
+          if (await applyTags(it.id, it.tags)) updated++;
+        }
+      } else {
+        const id = Number(url.searchParams.get('id') || body.id);
+        if (id && await applyTags(id, body.tags)) updated++;
+      }
+
+      return new Response(JSON.stringify({ success: true, updated }), { headers });
     }
 
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
