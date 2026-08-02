@@ -42,11 +42,18 @@ export async function onRequest(context) {
       if (!ids.length) {
         return new Response(JSON.stringify({ restored: 0 }), { headers });
       }
-      const placeholders = ids.map(() => '?').join(',');
-      const { meta } = await db.prepare(
-        `DELETE FROM deleted_comics WHERE comic_id IN (${placeholders})`
-      ).bind(...ids).run();
-      return new Response(JSON.stringify({ restored: meta.changes ?? ids.length }), { headers });
+      // D1 SQL 变量上限 ~100, 按批删除
+      let restored = 0;
+      const BATCH = 90;
+      for (let i = 0; i < ids.length; i += BATCH) {
+        const chunk = ids.slice(i, i + BATCH);
+        const placeholders = chunk.map(() => '?').join(',');
+        const { meta } = await db.prepare(
+          `DELETE FROM deleted_comics WHERE comic_id IN (${placeholders})`
+        ).bind(...chunk).run();
+        restored += meta.changes ?? chunk.length;
+      }
+      return new Response(JSON.stringify({ restored }), { headers });
     }
 
     // --- STATS ---

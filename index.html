@@ -795,16 +795,19 @@ async function confirmDelete(){
   const favSkipped=ids.length-toDel.length;
   let apiSkipped=0;
   try{
-    for(const id of toDel){
+    // 批量提交（一次请求，服务端循环处理）——避免逐条串行请求又慢又易半途失败
+    const items=toDel.map(id=>{
       const c=ALL.find(x=>String(x.id)===id);
-      const r=await fetch('/api/deleted',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({comic_id:parseInt(id),title:c?(c.title_cn||c.title_original||''):''})});
-      if(r.ok){
-        // 服务端仍可能拒绝（如收藏在其他设备刚添加）→ 计入跳过
-        const d=await r.json().catch(()=>({success:true}));
-        if(d&&d.success===false&&d.skipped){apiSkipped++;}
-        else{deletedIds.add(parseInt(id));}
-      }
-    }
+      return {comic_id:parseInt(id),title:c?(c.title_cn||c.title_original||''):''};
+    });
+    const r=await fetch('/api/deleted',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
+    const d=await r.json().catch(()=>({}));
+    if(!r.ok){throw new Error(d.error||r.status);}
+    apiSkipped=d.skipped||0;
+    // 服务端成功隐藏的加入本地隐藏集
+    items.forEach(it=>{
+      if(!favs.has(it.comic_id))deletedIds.add(it.comic_id);
+    });
     const hiddenCnt=toDel.length-apiSkipped;
     const totalSkipped=favSkipped+apiSkipped;
     $('del-status').textContent='✓ 已隐藏 '+hiddenCnt+' 册'+(totalSkipped?' · 收藏已自动跳过 '+totalSkipped+' 册':'');
