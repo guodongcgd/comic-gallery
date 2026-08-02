@@ -51,10 +51,6 @@ export async function onRequest(context) {
       }
 
       const now = new Date().toISOString();
-      let hidden = 0;
-      const stmt = db.prepare(
-        'INSERT OR IGNORE INTO deleted_comics (comic_id, deleted_at, title) VALUES (?, ?, ?)'
-      );
       // 先取这些漫画的 telegraph_url/telegram_url（按批查询）
       const urlMap = {};
       for (let i = 0; i < items.length; i += BATCH) {
@@ -65,17 +61,26 @@ export async function onRequest(context) {
         for (const r of urlRows.results) urlMap[r.id] = r;
       }
 
-      const updStmt = db.prepare(
-        'UPDATE deleted_comics SET telegraph_url = ?, telegram_url = ? WHERE comic_id = ?'
-      );
-      for (const it of items) {
-        if (favIds.has(it.comic_id)) continue; // 收藏跳过
-        const r = await stmt.bind(it.comic_id, now, it.title || '').run();
-        if (r.meta.changes > 0) hidden++; // 仅统计真实新增
-        const c = urlMap[it.comic_id];
-        if (c && (c.telegraph_url || c.telegram_url)) {
-          await updStmt.bind(c.telegraph_url || '', c.telegram_url || '', it.comic_id).run();
+      // 多行 VALUES 批量 INSERT（一次 D1 调用插多行，URL 直接带入）→ 大幅减少 D1 调用次数
+      // D1 SQL 变量上限 100：每行 5 个变量 → 每批最多 20 行
+      let hidden = 0;
+      const ROW_BATCH = 20;
+      for (let i = 0; i < items.length; i += ROW_BATCH) {
+        const chunk = items.slice(i, i + ROW_BATCH);
+        const vals = [];
+        const params = [];
+        for (const it of chunk) {
+          if (favIds.has(it.comic_id)) continue; // 收藏跳过
+          const c = urlMap[it.comic_id] || {};
+          vals.push('(?, ?, ?, ?, ?)');
+          params.push(it.comic_id, now, it.title || '', c.telegraph_url || '', c.telegram_url || '');
         }
+        if (!vals.length) continue;
+        const r = await db.prepare(
+          `INSERT OR IGNORE INTO deleted_comics (comic_id, deleted_at, title, telegraph_url, telegram_url)
+           VALUES ${vals.join(',')}`
+        ).bind(...params).run();
+        hidden += r.meta.changes || 0;
       }
       const skipped = items.length - hidden;
       return new Response(JSON.stringify({

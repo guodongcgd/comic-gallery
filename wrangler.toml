@@ -5,3 +5,7 @@ pages_build_output_dir = "."
 binding = "DB"
 database_name = "comic-gallery-db"
 database_id = "b8e816d1-dd60-42f5-802c-991149977738"
+
+[limits]
+# 提高单次 invocation 内 D1 调用上限（批量隐藏/恢复时大量 D1 调用）
+d1 = 1000
